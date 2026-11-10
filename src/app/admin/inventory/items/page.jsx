@@ -227,7 +227,7 @@ export default function ItemsPage() {
                   {can("inventory.update") && item.status === "ACTIVE" && <button onClick={() => setEditing({ item })} className={linkButton} aria-label={`Edit ${item.name}`}>Edit</button>}
                   {can("inventory.update") && item.status === "ACTIVE" && <button onClick={() => window.confirm(`Archive "${item.name}"? It will no longer take stock.`) && act(() => inventoryApi.archiveItem(item.id), "Item archived.")} className={linkButton}>Archive</button>}
                   {can("inventory.update") && item.status === "ARCHIVED" && <button onClick={() => act(() => inventoryApi.restoreItem(item.id), "Item restored.")} className={linkButton}>Restore</button>}
-                  {can("inventory.delete") && <button onClick={() => window.confirm(`Delete "${item.name}"? Only items that never had stock can be deleted.`) && act(() => inventoryApi.removeItem(item.id), "Item deleted.")} className={dangerButton}>Delete</button>}
+                  {can("inventory.delete") && <button onClick={() => window.confirm(`Delete "${item.name}"?${Number(item.onHand) > 0 ? ` Its opening stock (${qty(item.onHand)} ${item.unit}, ${money(item.stockValue)}) is removed with it.` : ""} Items that were bought, used or moved cannot be deleted; archive those instead.`) && act(() => inventoryApi.removeItem(item.id), "Item deleted.")} className={dangerButton}>Delete</button>}
                 </div>
               </td>
             </tr>

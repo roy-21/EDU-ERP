@@ -157,6 +157,16 @@ test("inventory: counts, write-offs and reversals keep an append-only ledger", l
   assert.strictEqual((await ctx.call("POST", "/inventory/stock/receive", { storeId: central.id, lines: [{ itemId: acid.id, quantity: 1 }] })).status, 409, "archived items take no stock");
   const fresh = ok(await ctx.call("POST", "/inventory/items", { name: "Unused" }));
   ok(await ctx.call("DELETE", `/inventory/items/${fresh.id}`), 200);
+
+  // An item entered by mistake with opening stock only is deleted with that stock, and then a
+  // store that held nothing else can be deleted too.
+  const branch = ok(await ctx.call("POST", "/inventory/stores", { code: "BR1", name: "Branch" }));
+  const typo = ok(await ctx.call("POST", "/inventory/items", { name: "Laptop", unit: "Piece", openingQuantity: 2, unitCost: 450000, storeId: branch.id }));
+  assert.strictEqual((await ctx.call("DELETE", `/inventory/stores/${branch.id}`)).status, 409, "the store holds the opening stock");
+  ok(await ctx.call("DELETE", `/inventory/items/${typo.id}`), 200);
+  const left = await postgresService.query("SELECT COUNT(*)::int AS n FROM inv_movements WHERE item_id = $1", [typo.id]);
+  assert.strictEqual(left.rows[0].n, 0, "its opening stock is gone");
+  ok(await ctx.call("DELETE", `/inventory/stores/${branch.id}`), 200);
 }));
 
 test("inventory: transfers are approved before stock leaves and received before it arrives", live(async () => {

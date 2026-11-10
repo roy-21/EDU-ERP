@@ -127,7 +127,7 @@ export const storesService = {
       const isActive = body?.isActive !== undefined ? body.isActive === true : current.is_active;
       if (!isActive && current.is_active) {
         const held = (await tx.query("SELECT 1 FROM inv_balances WHERE store_id = $1 AND quantity > 0 LIMIT 1", [id])).rows[0];
-        if (held) fail(409, "This store still holds stock. Transfer or issue it before closing the store.");
+        if (held) fail(409, "This store still holds stock. Transfer it to another store, issue it or write it off before closing the store.");
         const moving = (await tx.query("SELECT 1 FROM inv_transfers WHERE (from_store_id = $1 OR to_store_id = $1) AND status IN ('PENDING', 'IN_TRANSIT') LIMIT 1", [id])).rows[0];
         if (moving) fail(409, "A transfer to or from this store is still open.");
       }
@@ -509,7 +509,7 @@ export const itemsService = {
   async setArchived(actor: Actor, id: string, archived: boolean) {
     await inTx(async (tx) => {
       const item = await lockItem(tx, actor.institutionId, id);
-      if (archived && (await totalOnHand(tx, id)) > 0) fail(409, "This item still has stock. Issue or write it off before archiving.");
+      if (archived && (await totalOnHand(tx, id)) > 0) fail(409, "This item still has stock. Issue it or write it off before archiving. If it was entered by mistake and only has opening stock, delete it instead.");
       if (archived && (await tx.query("SELECT 1 FROM inv_transfer_lines l JOIN inv_transfers t ON t.id = l.transfer_id WHERE l.item_id = $1 AND t.status IN ('PENDING', 'IN_TRANSIT') LIMIT 1", [id])).rows[0]) {
         fail(409, "This item is on an open transfer.");
       }
@@ -522,15 +522,24 @@ export const itemsService = {
   async remove(actor: Actor, id: string) {
     return inTx(async (tx) => {
       const item = await lockItem(tx, actor.institutionId, id);
-      const used = (await tx.query(
-        `SELECT EXISTS (SELECT 1 FROM inv_movements WHERE item_id = $1) OR EXISTS (SELECT 1 FROM inv_transfer_lines WHERE item_id = $1)
-           OR EXISTS (SELECT 1 FROM inv_po_lines WHERE item_id = $1) OR EXISTS (SELECT 1 FROM inv_requisition_lines WHERE item_id = $1)
-           OR EXISTS (SELECT 1 FROM inv_assets WHERE item_id = $1) AS used`, [id])).rows[0].used;
-      if (used) fail(409, "This item has stock or purchase history. Archive it instead of deleting it.");
+      // An item whose only history is its opening stock was most likely entered by mistake, so it
+      // can still be deleted together with that opening stock. Anything else keeps its history.
+      const history = (await tx.query(
+        `SELECT EXISTS (SELECT 1 FROM inv_movements m WHERE m.item_id = $1 AND NOT (m.kind = 'OPENING'
+             OR (m.kind = 'REVERSAL' AND EXISTS (SELECT 1 FROM inv_movements o WHERE o.id = m.reverses_id AND o.kind = 'OPENING')))) AS moved,
+           EXISTS (SELECT 1 FROM inv_transfer_lines WHERE item_id = $1) OR EXISTS (SELECT 1 FROM inv_po_lines WHERE item_id = $1)
+             OR EXISTS (SELECT 1 FROM inv_requisition_lines WHERE item_id = $1) OR EXISTS (SELECT 1 FROM inv_assets WHERE item_id = $1) AS linked,
+           COALESCE((SELECT SUM(quantity) FROM inv_movements WHERE item_id = $1), 0)::float AS opening`, [id])).rows[0];
+      if (history.moved || history.linked) {
+        fail(409, "This item has been bought, used, moved or requested, so its history is kept. Write off any stock left, then archive it.");
+      }
+      await tx.query("DELETE FROM inv_movements WHERE item_id = $1 AND reverses_id IS NOT NULL", [id]);
+      await tx.query("DELETE FROM inv_movements WHERE item_id = $1", [id]);
       await tx.query("DELETE FROM inv_batches WHERE item_id = $1", [id]);
       await tx.query("DELETE FROM inv_balances WHERE item_id = $1", [id]);
       await tx.query("DELETE FROM inv_items WHERE id = $1", [id]);
-      await audit(tx, actor, "inventory.item.delete", "item", id, `Deleted ${item.sku} "${item.name}".`);
+      await audit(tx, actor, "inventory.item.delete", "item", id,
+        `Deleted ${item.sku} "${item.name}"${history.opening > 0 ? ` with its opening stock of ${history.opening} ${item.unit}` : ""}.`);
       return { id };
     });
   },
