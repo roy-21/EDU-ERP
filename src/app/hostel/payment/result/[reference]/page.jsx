@@ -11,3 +11,4 @@ export default async function HostelPaymentResultPage({ params }) {
 
   return <PaymentResult reference={reference} />;
 }
+
