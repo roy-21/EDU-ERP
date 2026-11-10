@@ -1,7 +1,5 @@
+import NotConnected from "../_components/NotConnected";
 
-import NoticeList from "../_components/NoticeList";
-import { noticePages } from "../_components/noticeData";
-
-export default function SMSPage() {
-  return <NoticeList config={noticePages.sms} />;
+export default function SmsPage() {
+  return <NotConnected title="SMS" channel="SMS" needs="an account with a Bangladeshi SMS gateway (for example a masking or non-masking sender ID) and its API key on the server" />;
 }

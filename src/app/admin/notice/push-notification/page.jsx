@@ -1,7 +1,5 @@
-
-import NoticeList from "../_components/NoticeList";
-import { noticePages } from "../_components/noticeData";
+import NotConnected from "../_components/NotConnected";
 
 export default function PushNotificationPage() {
-  return <NoticeList config={noticePages.pushNotification} />;
+  return <NotConnected title="Push Notifications" channel="Push notification" needs="a mobile app or a web push service (such as Firebase Cloud Messaging) with its server key" />;
 }

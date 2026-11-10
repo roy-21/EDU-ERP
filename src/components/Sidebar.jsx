@@ -2,18 +2,55 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useMe } from "@/lib/useMe";
+import { featuresApi } from "@/lib/identityServices";
 import { sidebarModules } from "@/lib/moduleData"; // আপনার ডাটা পাথ
 import SearchInput from "./ModuleSearch";
 import { useSidebarStore } from "@/store/useSidebarStore";
+import { useHostelPermissions } from "@/lib/hostelPermissions";
+import DueRentCount from "./DueRentCount";
+import { hasModuleAccess, pathAccess } from "@/lib/access";
 
 export default function Sidebar({ isOpen, onClose }) {
   const searchQuery = useSidebarStore((state) => state.searchQuery);
+  const { has } = useHostelPermissions();
+  const { me, can } = useMe();
+  const [features, setFeatures] = useState([]);
 
-  let filteredModules = sidebarModules;
+  // Custom features the user may open, shown under their module.
+  useEffect(() => {
+    let isCurrent = true;
+    featuresApi.available().then((list) => isCurrent && setFeatures(list)).catch(() => {});
+    return () => { isCurrent = false; };
+  }, []);
+
+  // Every module is listed. The ones the institution bought are open; the rest show a lock marked
+  // "Not subscribed". Inside a bought module, a module or page the user has no permission for is locked too.
+  // Only the platform menu stays hidden from anyone but the platform owner.
+  // Until the server has answered, nothing is locked; it enforces access either way.
+  const shown = (item) => !me || !item.requiresRole || item.requiresRole.includes(me.role);
+  const isAdmin = me?.role === "ADMIN" || me?.role === "SUPER_ADMIN";
+  const subLocked = (sub) =>
+    Boolean(me) && ((sub.requiresRole && !sub.requiresRole.includes(me.role)) || (sub.requires && !can(sub.requires)) || (sub.permission && !has(sub.permission)) || (sub.href && !pathAccess(me, sub.href).ok));
+
+  const withFeatures = sidebarModules
+    .filter(shown)
+    .map((mod) => {
+      const extra = features
+        .filter((feature) => feature.moduleId === mod.moduleId)
+        .map((feature) => ({ title: `${feature.icon || "🧩"} ${feature.name}`, href: `/admin/features/${feature.moduleId}/${feature.key}` }));
+      const subMenus = [...(mod.subMenus || []), ...extra].map((sub) => ({ ...sub, locked: subLocked(sub) }));
+      const notSubscribed = Boolean(me) && Boolean(mod.moduleId) && !me.modules?.includes(mod.moduleId);
+      const locked = notSubscribed || (Boolean(me) && Boolean(mod.moduleId) && !hasModuleAccess(me, mod.moduleId));
+      return { ...mod, locked, notSubscribed, subMenus: locked ? [] : subMenus };
+    });
+
+  let filteredModules = withFeatures;
   
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
-    filteredModules = sidebarModules
+    filteredModules = withFeatures
       .map((mod) => {
         const titleMatch = mod.title.toLowerCase().includes(q);
         const filteredSubs = mod.subMenus
@@ -82,6 +119,26 @@ export default function Sidebar({ isOpen, onClose }) {
               <ul className="space-y-1">
                 {filteredModules.map((module, index) => (
                   <li key={module.id || index} className="mb-2">
+                    {module.locked && module.notSubscribed && isAdmin ? (
+                      <Link href="/admin/settings/subscription" onClick={onClose} title="Not in your subscription. Open Subscription & Modules to add it." data-locked="not-subscribed"
+                        className="flex items-center justify-between rounded-lg px-3 py-2.5 text-slate-500 hover:bg-slate-800 hover:text-slate-300">
+                        <span className="flex items-center gap-3">
+                          <span className="text-lg opacity-50">{module.icon}</span>
+                          <span className="text-sm">{module.title}</span>
+                        </span>
+                        <span className="flex items-center gap-1 text-xs"><span>Not subscribed</span><span aria-label="Locked">🔒</span></span>
+                      </Link>
+                    ) : module.locked ? (
+                      <div title={module.notSubscribed ? "Your institution has not subscribed to this module" : "You do not have permission for this module"} aria-disabled="true"
+                        data-locked={module.notSubscribed ? "not-subscribed" : "no-permission"}
+                        className="flex cursor-not-allowed items-center justify-between rounded-lg px-3 py-2.5 text-slate-500">
+                        <span className="flex items-center gap-3">
+                          <span className="text-lg opacity-50">{module.icon}</span>
+                          <span className="text-sm">{module.title}</span>
+                        </span>
+                        <span className="flex items-center gap-1 text-xs">{module.notSubscribed && <span>Not subscribed</span>}<span aria-label="Locked">🔒</span></span>
+                      </div>
+                    ) : (
                     <details open={!!searchQuery} className="group">
                       <summary className={`flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer list-none transition-colors duration-200 hover:bg-slate-800 ${module.isMainModule ? "text-blue-500 font-bold" : "text-slate-200 font-medium"}`}>
                         <div className="flex items-center gap-3">
@@ -96,12 +153,23 @@ export default function Sidebar({ isOpen, onClose }) {
                       {module.subMenus && module.subMenus.length > 0 && (
                         <ul className="mt-1 ml-4 pl-4 border-l border-slate-700 space-y-1">
                           {module.subMenus.map((sub, subIndex) => {
+                            if (sub.locked) {
+                              return (
+                                <li key={subIndex}>
+                                  <span title="You do not have permission for this page" aria-disabled="true" className="flex cursor-not-allowed items-center justify-between rounded-md px-3 py-2 text-sm text-slate-500">
+                                    {sub.title}
+                                    <span aria-label="Locked">🔒</span>
+                                  </span>
+                                </li>
+                              );
+                            }
                             const hasNotes = sub.notes && sub.notes.length > 0;
                             if (!hasNotes) {
                               return (
                                 <li key={subIndex}>
                                   <Link href={sub.href} onClick={onClose} className="block px-3 py-2 text-sm text-slate-300 rounded-md transition-all duration-200 hover:text-white hover:bg-slate-800 hover:pl-4 font-medium">
                                     {sub.title}
+                                    {sub.badge === "dueRent" && has("view_due_rent") && <> <DueRentCount /></>}
                                   </Link>
                                 </li>
                               );
@@ -136,6 +204,7 @@ export default function Sidebar({ isOpen, onClose }) {
                         </ul>
                       )}
                     </details>
+                    )}
                   </li>
                 ))}
               </ul>

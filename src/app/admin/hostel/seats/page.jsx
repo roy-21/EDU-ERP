@@ -1,7 +1,10 @@
-
-import HostelList from "../_components/HostelList";
-import { hostelPages } from "../_components/hostelData";
+import SeatManagement from "../_components/SeatManagement";
+import { HostelFeatureGate } from "../_components/hostelUi";
 
 export default function SeatsPage() {
-  return <HostelList config={hostelPages.seats} />;
+  return (
+    <HostelFeatureGate slug="seats" title="Seat Management">
+      <SeatManagement />
+    </HostelFeatureGate>
+  );
 }

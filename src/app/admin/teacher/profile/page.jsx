@@ -1,118 +1,125 @@
 "use client";
-import { useState } from "react";
 
-const mockTeachers = [
-  { id: 1, name: "Dr. Ayesha Siddika", dept: "CSE", designation: "Professor", photo: "👩‍🏫", qualification: "PhD in CS", research: "Machine Learning", officeHour: "Sat, 4:00 PM - 6:00 PM", salaryGrade: "Grade 10", leaves: 12 },
-  { id: 2, name: "Md. Rassel Hossain", dept: "BBA", designation: "Lecturer", photo: "👨‍🏫", qualification: "MBA", research: "Marketing", officeHour: "Sun, 10:00 AM - 12:00 PM", salaryGrade: "Grade 7", leaves: 8 },
-  { id: 3, name: "Farzana Akter", dept: "English", designation: "Asst. Professor", photo: "👩‍💼", qualification: "M.A. in Literature", research: "Linguistics", officeHour: "Mon, 2:00 PM - 4:00 PM", salaryGrade: "Grade 8", leaves: 10 },
-];
+import { useCallback, useState } from "react";
+import { structureApi, teachersApi } from "@/lib/academicsApi";
+import { useMe } from "@/lib/useMe";
+import {
+  DataTable,
+  ErrorBanner,
+  FormModal,
+  NoAccess,
+  SelectField,
+  StatusBadge,
+  SystemShell,
+  TextField,
+  filterClass,
+  friendlyError,
+  linkButton,
+  primaryButton,
+  useData,
+} from "@/components/erp/ui";
+
+const STATUS_LABEL = { ACTIVE: "Active", ON_LEAVE: "On Leave", INACTIVE: "Inactive" };
+const loadDepartments = () => structureApi.list("departments");
+
+function TeacherForm({ teacher, departments, onClose, onSaved }) {
+  const [form, setForm] = useState(() => ({
+    employeeNo: teacher?.employeeNo || "", fullName: teacher?.fullName || "", email: teacher?.email || "", phone: teacher?.phone || "",
+    departmentId: teacher?.departmentId || "", designation: teacher?.designation || "", qualification: teacher?.qualification || "",
+    joinedOn: teacher?.joinedOn || "", status: teacher?.status || "ACTIVE",
+  }));
+  const set = (key) => (value) => setForm((previous) => ({ ...previous, [key]: value }));
+  const handleSubmit = async () => {
+    const body = { ...form, departmentId: form.departmentId || null, joinedOn: form.joinedOn || null };
+    if (teacher) {
+      delete body.employeeNo;
+      await teachersApi.update(teacher.id, body);
+    } else {
+      delete body.status;
+      await teachersApi.create(body);
+    }
+    onSaved();
+  };
+  return (
+    <FormModal title={teacher ? `Edit ${teacher.fullName}` : "Add Teacher"} submitLabel="Save" onSubmit={handleSubmit} onClose={onClose}>
+      <TextField id="t-no" label="Employee Number *" value={form.employeeNo} maxLength={40} onChange={set("employeeNo")} disabled={Boolean(teacher)} />
+      <TextField id="t-name" label="Full Name *" value={form.fullName} maxLength={150} onChange={set("fullName")} />
+      <TextField id="t-email" label="Email (sign-in goes here)" type="email" value={form.email} maxLength={255} onChange={set("email")} />
+      <TextField id="t-phone" label="Phone" value={form.phone} maxLength={30} onChange={set("phone")} />
+      <SelectField id="t-dept" label="Department" value={form.departmentId} onChange={set("departmentId")} options={[{ value: "", label: "None" }, ...departments.map((d) => ({ value: d.id, label: `${d.code} · ${d.name}` }))]} />
+      <TextField id="t-designation" label="Designation" value={form.designation} maxLength={100} onChange={set("designation")} />
+      <TextField id="t-qualification" label="Qualification" value={form.qualification} maxLength={200} onChange={set("qualification")} />
+      <TextField id="t-joined" label="Joined On" type="date" value={form.joinedOn} onChange={set("joinedOn")} />
+      {teacher && <SelectField id="t-status" label="Status" value={form.status} onChange={set("status")} options={Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))} />}
+    </FormModal>
+  );
+}
 
 export default function TeacherProfilePage() {
-  const [teachers] = useState(mockTeachers);
-  const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const { can, isReady } = useMe();
+  const [filters, setFilters] = useState({ search: "", departmentId: "", status: "" });
+  const load = useCallback(() => teachersApi.list(filters), [filters]);
+  const { data: teachers, error, isLoading, reload } = useData(load);
+  const { data: departments } = useData(loadDepartments);
+  const [modal, setModal] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [actionError, setActionError] = useState("");
 
-  const profileSections = selectedTeacher ? [
-    {
-      title: "Academic & Research",
-      items: [
-        { label: "Department", value: selectedTeacher.dept },
-        { label: "Designation", value: selectedTeacher.designation },
-        { label: "Highest Qualification", value: selectedTeacher.qualification },
-        { label: "Research Area", value: selectedTeacher.research },
-        { label: "Office Hour", value: selectedTeacher.officeHour },
-      ]
-    },
-    {
-      title: "HR & Administration",
-      items: [
-        { label: "Salary Grade", value: selectedTeacher.salaryGrade },
-        { label: "Remaining Leaves", value: selectedTeacher.leaves },
-      ]
+  if (isReady && !can("teacher.read")) return <NoAccess />;
+
+  const account = async (teacher) => {
+    setActionError("");
+    setNotice("");
+    try {
+      const result = await teachersApi.createAccount(teacher.id);
+      setNotice(result.credentials.delivered ? `Account ${result.username} created; the sign-in details were emailed.` : `Account ${result.username} created, but the email was not sent: ${result.credentials.reason}`);
+      reload();
+    } catch (err) {
+      setActionError(friendlyError(err));
     }
-  ] : [];
+  };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-slate-100 overflow-hidden">
-      {/* Left: Teacher List */}
-      <div className="w-96 bg-white border-r border-slate-200 flex flex-col flex-shrink-0">
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-          <h1 className="text-lg font-bold text-slate-800">Teachers</h1>
-          <button className="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700 font-bold">+ Add Teacher</button>
-        </div>
-        <div className="p-3">
-          <input type="text" placeholder="Search by name or dept..." className="w-full px-3 py-2 text-sm border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-          {teachers.map(teacher => (
-            <button
-              key={teacher.id}
-              onClick={() => setSelectedTeacher(teacher)}
-              className={`w-full text-left p-4 hover:bg-slate-50 transition-all border-l-4 ${selectedTeacher?.id === teacher.id ? "border-blue-600 bg-blue-50" : "border-transparent"}`}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-xl">{teacher.photo}</div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">{teacher.name}</p>
-                  <p className="text-xs text-slate-500">{teacher.designation} • {teacher.dept}</p>
+    <SystemShell
+      title="Teachers"
+      subtitle="Faculty records. A teacher with an account sees only their own classes for attendance and marks."
+      actions={can("teacher.create") && <button onClick={() => setModal({})} className={primaryButton}>Add Teacher</button>}
+    >
+      <ErrorBanner message={error || actionError} onDismiss={actionError ? () => setActionError("") : undefined} />
+      {notice && <p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-700">{notice}</p>}
+      <div className="flex flex-wrap gap-3">
+        <input aria-label="Search teachers" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Search name, employee number or email" className={`${filterClass} min-w-[16rem] flex-1`} />
+        <select aria-label="Filter by department" value={filters.departmentId} onChange={(e) => setFilters({ ...filters, departmentId: e.target.value })} className={filterClass}>
+          <option value="">All departments</option>
+          {(departments || []).map((d) => <option key={d.id} value={d.id}>{d.code}</option>)}
+        </select>
+        <select aria-label="Filter by status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className={filterClass}>
+          <option value="">Any status</option>
+          {Object.entries(STATUS_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </div>
+      <section className="rounded-xl border border-slate-200 bg-white">
+        <DataTable columns={["Employee No", "Name", "Department", "Designation", "Classes Now", "Status", "Account", "Actions"]} isLoading={isLoading && !teachers} hasRows={(teachers || []).length > 0} emptyMessage="No teachers yet." minWidth="min-w-[900px]">
+          {(teachers || []).map((t) => (
+            <tr key={t.id} className="border-b border-slate-100">
+              <td className="px-4 py-3 font-mono text-xs text-slate-700">{t.employeeNo}</td>
+              <td className="px-4 py-3"><p className="font-medium text-slate-800">{t.fullName}</p><p className="text-xs text-slate-500">{t.email || t.phone || ""}</p></td>
+              <td className="px-4 py-3 text-slate-600">{t.departmentName || "—"}</td>
+              <td className="px-4 py-3 text-slate-600">{t.designation || "—"}</td>
+              <td className="px-4 py-3 text-slate-600">{t.classes}</td>
+              <td className="px-4 py-3"><StatusBadge status={STATUS_LABEL[t.status]} /></td>
+              <td className="px-4 py-3 text-xs text-slate-600">{t.username || "—"}</td>
+              <td className="px-4 py-3">
+                <div className="flex gap-3 whitespace-nowrap">
+                  {can("teacher.update") && <button onClick={() => setModal({ teacher: t })} aria-label={`Edit ${t.fullName}`} className={linkButton}>Edit</button>}
+                  {can("teacher.update") && !t.username && <button onClick={() => account(t)} disabled={!t.email} className={`${linkButton} disabled:opacity-40`} aria-label={`Create account for ${t.fullName}`}>Create Account</button>}
                 </div>
-              </div>
-            </button>
+              </td>
+            </tr>
           ))}
-        </div>
-      </div>
-
-      {/* Right: Profile Details Drawer */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
-        {!selectedTeacher ? (
-          <div className="flex-1 flex items-center justify-center text-slate-400">Select a teacher to view profile</div>
-        ) : (
-          <>
-            <div className="p-4 border-b border-slate-200 bg-white flex justify-between items-center flex-shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-xl">{selectedTeacher.photo}</div>
-                <div>
-                  <h2 className="font-bold text-slate-800">{selectedTeacher.name}</h2>
-                  <p className="text-xs text-slate-500">{selectedTeacher.designation} • {selectedTeacher.dept}</p>
-                </div>
-              </div>
-              <button onClick={() => setSelectedTeacher(null)} className="text-slate-400 hover:text-slate-600 font-bold">✕</button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="max-w-3xl mx-auto space-y-6">
-                {profileSections.map((section, sIdx) => (
-                  <div key={sIdx} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                    <h3 className="text-sm font-bold text-slate-700 border-b border-slate-100 pb-2 mb-4">{section.title}</h3>
-                    <div className="grid grid-cols-2 gap-6">
-                      {section.items.map((item, iIdx) => (
-                        <div key={iIdx}>
-                          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{item.label}</p>
-                          <p className="text-sm font-medium text-slate-800 mt-1">{item.value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                
-                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                  <h3 className="text-sm font-bold text-slate-700 border-b border-slate-100 pb-2 mb-4">Publications</h3>
-                  <div className="space-y-3">
-                    {["Impact Factor of AI in Modern Education (Journal of Tech, 2023)", "Data Structures: A Visual Approach (Book Chapter, 2022)"].map((pub, i) => (
-                      <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg">
-                        <span className="mt-0.5 text-blue-500">📄</span>
-                        <div>
-                          <p className="text-sm font-medium text-slate-700">{pub}</p>
-                          <p className="text-[10px] text-slate-400 mt-0.5">Published: 2023</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+        </DataTable>
+      </section>
+      {modal && <TeacherForm teacher={modal.teacher} departments={departments || []} onClose={() => setModal(null)} onSaved={() => { setModal(null); setNotice("Teacher saved."); reload(); }} />}
+    </SystemShell>
   );
 }

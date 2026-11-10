@@ -1,7 +1,10 @@
-
-import HostelList from "../_components/HostelList";
-import { hostelPages } from "../_components/hostelData";
+import RoomManagement from "../_components/RoomManagement";
+import { HostelFeatureGate } from "../_components/hostelUi";
 
 export default function RoomsPage() {
-  return <HostelList config={hostelPages.rooms} />;
+  return (
+    <HostelFeatureGate slug="rooms" title="Room Management">
+      <RoomManagement />
+    </HostelFeatureGate>
+  );
 }

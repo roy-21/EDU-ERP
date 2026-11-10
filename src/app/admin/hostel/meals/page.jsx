@@ -1,7 +1,5 @@
-
-import HostelList from "../_components/HostelList";
-import { hostelPages } from "../_components/hostelData";
+import MealManagement from "../_components/MealManagement";
 
 export default function MealsPage() {
-  return <HostelList config={hostelPages.meals} />;
+  return <MealManagement />;
 }

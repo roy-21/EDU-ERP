@@ -12,11 +12,11 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Every screen is designed on light surfaces (white cards, slate-50 pages), so the app stays light
+   even when the device is in dark mode. A dark-mode foreground here made unstyled text near-white
+   on those white cards. */
+:root {
+  color-scheme: light;
 }
 
 body {

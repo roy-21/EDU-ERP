@@ -1,8 +1,18 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { systemService } from "@/lib/erpServices";
 
+const toBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("The file could not be read."));
+    reader.readAsDataURL(file);
+  });
+
+// Each page is saved on the server for this institution only.
 export default function SettingsForm({ config }) {
   const [formData, setFormData] = useState(() =>
     Object.fromEntries(
@@ -12,6 +22,20 @@ export default function SettingsForm({ config }) {
 
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [server, setServer] = useState(null);
+
+  useEffect(() => {
+    let isCurrent = true;
+    systemService
+      .getSettingsSection(config.section)
+      .then((result) => {
+        if (!isCurrent) return;
+        setServer(result);
+        setFormData((previous) => ({ ...previous, ...result.data }));
+      })
+      .catch((err) => isCurrent && setServer({ error: err.message, notes: [] }));
+    return () => { isCurrent = false; };
+  }, [config.section]);
 
   const handleChange = (name, value) => {
     setFormData((prev) => ({
@@ -21,15 +45,32 @@ export default function SettingsForm({ config }) {
     setMessage("");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
 
-    // Demo only: connect your settings API here.
-    setTimeout(() => {
+    try {
+      const payload = {};
+      for (const field of config.fields) {
+        const value = formData[field.name];
+        if (field.type === "file") {
+          // Only a newly chosen file is sent; a saved image stays as it is.
+          if (value instanceof File) payload[field.name] = { fileName: value.name, contentBase64: await toBase64(value) };
+        } else if (field.type === "number") {
+          payload[field.name] = value === "" || value === null || value === undefined ? null : Number(value);
+        } else {
+          payload[field.name] = value;
+        }
+      }
+      const result = await systemService.saveSettingsSection(config.section, payload);
+      setServer(result);
+      setFormData((previous) => ({ ...previous, ...result.data }));
+      setMessage("Saved for your institution.");
+    } catch (err) {
+      setMessage(`Not saved: ${err.message}`);
+    } finally {
       setSaving(false);
-      setMessage("Settings updated in demo mode.");
-    }, 500);
+    }
   };
 
   const renderField = (field) => {
@@ -96,9 +137,9 @@ export default function SettingsForm({ config }) {
             }
             className="w-full rounded-lg border border-slate-200 p-2 text-sm"
           />
-          {formData[field.name]?.name && (
+          {(formData[field.name]?.name || formData[field.name]?.fileName) && (
             <p className="mt-2 text-xs text-slate-500">
-              Selected: {formData[field.name].name}
+              {formData[field.name] instanceof File ? `Selected: ${formData[field.name].name}` : `Saved: ${formData[field.name].fileName}`}
             </p>
           )}
         </div>
@@ -146,6 +187,14 @@ export default function SettingsForm({ config }) {
         </p>
       </div>
 
+      {server?.notes?.length > 0 && (
+        <ul className="space-y-1 rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
+          {server.notes.map((note) => <li key={note}>{note}</li>)}
+        </ul>
+      )}
+      {server?.error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">Could not load saved settings: {server.error}</p>}
+
+      {!server?.managedElsewhere && (
       <form
         onSubmit={handleSubmit}
         className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6"
@@ -204,12 +253,11 @@ export default function SettingsForm({ config }) {
           </button>
         </div>
       </form>
+      )}
 
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        <strong>Demo Mode:</strong> Changes are currently stored only in
-        component state. Connect the backend API for persistent settings.
-        Sensitive credentials must be saved securely on the server.
-      </div>
+      {server?.updatedAt && (
+        <p className="text-xs text-slate-500">Last saved {new Date(server.updatedAt).toLocaleString()} by {server.updatedBy}.</p>
+      )}
     </div>
   );
 }

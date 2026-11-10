@@ -1,7 +1,6 @@
+import { redirect } from "next/navigation";
 
-import InventoryList from "../_components/InventoryList";
-import { inventoryPages } from "../_components/inventoryData";
-
-export default function FurniturePage() {
-  return <InventoryList config={inventoryPages.furniture} />;
+// Computers, lab equipment, furniture and asset tracking are one asset register now.
+export default function OldAssetPage() {
+  redirect("/admin/inventory/assets");
 }

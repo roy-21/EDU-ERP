@@ -1,316 +1,129 @@
-
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useState } from "react";
+import { noticesApi } from "@/lib/operationsApi";
+import { useMe } from "@/lib/useMe";
+import QuickForm, { label, toLocalInput } from "@/components/erp/QuickForm";
+import { DataTable, ErrorBanner, NoAccess, SystemShell, ViewModal, dangerButton, filterClass, formatDateTime, friendlyError, linkButton, primaryButton, useData } from "@/components/erp/ui";
 
-const statusOptions = {
-  notices: ["Draft", "Scheduled", "Published", "Expired", "Archived"],
-  announcements: ["Draft", "Scheduled", "Published", "Expired", "Archived"],
-  popup: ["Active", "Inactive", "Scheduled", "Expired"],
-  sms: ["Pending", "Sent", "Failed", "Scheduled"],
-  email: ["Draft", "Scheduled", "Sent", "Failed"],
-  pushNotification: ["Draft", "Scheduled", "Sent", "Failed"],
+export const CATEGORIES = ["GENERAL", "ACADEMIC", "EXAM", "EVENT", "HOLIDAY", "FINANCE", "URGENT"];
+export const AUDIENCES = [["ALL", "Everyone"], ["STUDENTS", "Students"], ["GUARDIANS", "Guardians"], ["TEACHERS", "Teachers"], ["STAFF", "Staff"]];
+const audienceName = (value) => AUDIENCES.find(([key]) => key === value)?.[1] || value;
+
+const STATUS_STYLES = { DRAFT: "bg-slate-100 text-slate-700", PUBLISHED: "bg-green-100 text-green-700", ARCHIVED: "bg-slate-200 text-slate-500" };
+
+// Whether a published notice is showing right now, waiting for its start, or past its end.
+export const liveState = (notice) => {
+  if (notice.status !== "PUBLISHED") return label(notice.status);
+  const now = Date.now();
+  if (notice.publishAt && Date.parse(notice.publishAt) > now) return "Scheduled";
+  if (notice.expiresAt && Date.parse(notice.expiresAt) <= now) return "Expired";
+  return "Showing";
 };
 
-const statusStyles = {
-  Draft: "bg-slate-100 text-slate-700",
-  Scheduled: "bg-amber-100 text-amber-700",
-  Published: "bg-green-100 text-green-700",
-  Active: "bg-green-100 text-green-700",
-  Inactive: "bg-slate-100 text-slate-600",
-  Expired: "bg-red-100 text-red-700",
-  Archived: "bg-slate-200 text-slate-700",
-  Pending: "bg-amber-100 text-amber-700",
-  Sent: "bg-green-100 text-green-700",
-  Failed: "bg-red-100 text-red-700",
-};
+const fields = (display) => [
+  { name: "title", label: "Title *", wide: true },
+  { name: "body", label: "Message *", type: "textarea" },
+  { name: "category", label: "Category", type: "select", noBlank: true, options: CATEGORIES.map((c) => [c, label(c)]) },
+  { name: "audience", label: "Who sees it", type: "select", noBlank: true, options: AUDIENCES },
+  { name: "display", label: "Show as", type: "select", noBlank: true, disabled: Boolean(display), options: [["BOARD", "Notice board"], ["POPUP", "Pop-up when they sign in"]] },
+  { name: "isPinned", label: "Pin to the top" },
+  { name: "publishAt", label: "Show from (optional)", type: "datetime-local" },
+  { name: "expiresAt", label: "Show until (optional)", type: "datetime-local" },
+].map((field) => (field.name === "isPinned" ? { ...field, type: "checkbox" } : field));
 
-export default function NoticeList({ config }) {
-  const [records, setRecords] = useState(config.records);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [selected, setSelected] = useState(null);
-
-  const filteredRecords = useMemo(() => {
-    return records.filter((item) => {
-      const searchText = [
-        item.id,
-        item.title,
-        item.category,
-        item.description,
-        item.audience,
-        item.recipient,
-        item.createdBy,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      const matchesSearch = searchText.includes(search.toLowerCase());
-      const matchesStatus =
-        statusFilter === "All" || item.status === statusFilter;
-
-      return matchesSearch && matchesStatus;
-    });
-  }, [records, search, statusFilter]);
-
-  const publishedCount = records.filter((item) =>
-    ["Published", "Active", "Sent"].includes(item.status)
-  ).length;
-
-  const pendingCount = records.filter((item) =>
-    ["Draft", "Pending", "Scheduled", "Inactive"].includes(item.status)
-  ).length;
-
-  const updateStatus = (id, status) => {
-    setRecords((previous) =>
-      previous.map((item) =>
-        item.id === id ? { ...item, status } : item
-      )
-    );
-
-    setSelected((previous) =>
-      previous?.id === id ? { ...previous, status } : previous
-    );
-  };
-
-  const handleAdd = () => {
-    alert("Create form will be connected with the backend later.");
-  };
-
+export function NoticeView({ notice, onClose }) {
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
-        {/* Header */}
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">
-              {config.title}
-            </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              {config.subtitle}
-            </p>
-          </div>
-
-          <button
-            onClick={handleAdd}
-            className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
-          >
-            + Add New Record
-          </button>
-        </div>
-
-        {/* Statistics */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            title="Total Records"
-            value={records.length}
-            icon="📋"
-          />
-          <StatCard
-            title="Published / Sent / Active"
-            value={publishedCount}
-            icon="✅"
-          />
-          <StatCard
-            title="Pending / Scheduled"
-            value={pendingCount}
-            icon="⏳"
-          />
-          <StatCard
-            title="Filtered Records"
-            value={filteredRecords.length}
-            icon="🔎"
-          />
-        </div>
-
-        {/* Search and Filter */}
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            <input
-              type="text"
-              placeholder="Search by title, ID, category..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500 md:col-span-2"
-            />
-
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
-            >
-              <option value="All">All Status</option>
-              {statusOptions[config.type]?.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="font-semibold text-slate-800">
-              {config.title} Records
-            </h2>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[850px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-5 py-4">Reference</th>
-                  <th className="px-5 py-4">Title</th>
-                  <th className="px-5 py-4">Category</th>
-                  <th className="px-5 py-4">Audience / Recipient</th>
-                  <th className="px-5 py-4">Date</th>
-                  <th className="px-5 py-4">Status</th>
-                  <th className="px-5 py-4">Action</th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-slate-100">
-                {filteredRecords.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-5 py-4 font-medium text-slate-700">
-                      {item.id}
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="font-semibold text-slate-800">
-                        {item.title}
-                      </p>
-                      <p className="mt-1 max-w-xs truncate text-xs text-slate-500">
-                        {item.description}
-                      </p>
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">
-                      {item.category}
-                    </td>
-                    <td className="px-5 py-4 text-slate-600">
-                      {item.audience || item.recipient || "—"}
-                    </td>
-                    <td className="whitespace-nowrap px-5 py-4 text-slate-600">
-                      {item.date}
-                    </td>
-                    <td className="px-5 py-4">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          statusStyles[item.status] ||
-                          "bg-slate-100 text-slate-700"
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <button
-                        onClick={() => setSelected(item)}
-                        className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-600 hover:bg-blue-50"
-                      >
-                        View Details
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-
-                {filteredRecords.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan="7"
-                      className="px-5 py-10 text-center text-slate-500"
-                    >
-                      No records found.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Details Panel */}
-        {selected && (
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-bold text-slate-800">
-                  Record Details
-                </h2>
-                <p className="text-sm text-slate-500">{selected.id}</p>
-              </div>
-
-              <button
-                onClick={() => setSelected(null)}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {Object.entries(selected)
-                .filter(
-                  ([key]) =>
-                    !["id", "description", "status"].includes(key)
-                )
-                .map(([key, value]) => (
-                  <div
-                    key={key}
-                    className="rounded-lg bg-slate-50 p-3"
-                  >
-                    <p className="text-xs capitalize text-slate-500">
-                      {key.replace(/([A-Z])/g, " $1")}
-                    </p>
-                    <p className="mt-1 break-words text-sm font-semibold text-slate-800">
-                      {String(value)}
-                    </p>
-                  </div>
-                ))}
-            </div>
-
-            <div className="mt-4 rounded-lg bg-slate-50 p-3">
-              <p className="text-xs text-slate-500">Description</p>
-              <p className="mt-1 text-sm text-slate-700">
-                {selected.description}
-              </p>
-            </div>
-
-            <div className="mt-5 max-w-sm">
-              <label className="mb-2 block text-sm font-semibold text-slate-700">
-                Update Status
-              </label>
-              <select
-                value={selected.status}
-                onChange={(e) =>
-                  updateStatus(selected.id, e.target.value)
-                }
-                className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-blue-500"
-              >
-                {statusOptions[config.type]?.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+    <ViewModal title={notice.title} onClose={onClose}>
+      <p className="text-xs text-slate-500">{label(notice.category)} · {audienceName(notice.audience)} · {formatDateTime(notice.publishAt || notice.publishedAt || notice.createdAt)}</p>
+      <p className="whitespace-pre-line text-sm leading-6 text-slate-700">{notice.body}</p>
+    </ViewModal>
   );
 }
 
-function StatCard({ title, value, icon }) {
+// Writing, publishing and archiving notices. With `display`, only that kind is listed and created.
+export default function NoticeManager({ title = "Notices", subtitle, display }) {
+  const { can, isReady } = useMe();
+  const [filters, setFilters] = useState({ status: "", search: "" });
+  const load = useCallback(() => noticesApi.list(filters), [filters]);
+  const { data, error, isLoading, reload } = useData(load);
+  const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [actionError, setActionError] = useState("");
+
+  if (isReady && !can("notice.create", "notice.update", "notice.approve", "notice.delete")) return <NoAccess message="Only people who write notices can open this page. Everyone else reads them on the notice board." />;
+  const rows = (data || []).filter((row) => !display || row.display === display);
+
+  const act = async (work, text) => {
+    setActionError("");
+    try {
+      await work();
+      setNotice(text);
+      reload();
+    } catch (err) {
+      setActionError(friendlyError(err));
+    }
+  };
+
+  const save = async (body) => {
+    if (!editing) return;
+    const payload = { ...body, display: display || body.display };
+    if (editing.notice) await noticesApi.update(editing.notice.id, payload);
+    else await noticesApi.create({ ...payload, publish: editing.publish });
+    setEditing(null);
+    setNotice(editing.publish ? "Notice published." : "Notice saved.");
+    reload();
+  };
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-slate-500">{title}</p>
-        <span className="text-2xl">{icon}</span>
+    <SystemShell title={title} subtitle={subtitle || "Write a notice, choose who sees it, then publish. Drafts are visible only here."}
+      crumbs={[{ href: "/admin/notice", label: "Notice Board" }]}
+      actions={can("notice.create") && (
+        <>
+          {can("notice.approve") && <button onClick={() => setEditing({ publish: true })} className={primaryButton}>New &amp; Publish</button>}
+          <button onClick={() => setEditing({ publish: false })} className={can("notice.approve") ? "w-fit rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50" : primaryButton}>New Draft</button>
+        </>
+      )}>
+      <ErrorBanner message={error || actionError} onDismiss={actionError ? () => setActionError("") : undefined} />
+      {notice && <p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-700">{notice}</p>}
+      <div className="flex flex-wrap gap-3">
+        <input aria-label="Search notices" value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="Search title or message" className={`${filterClass} min-w-[16rem]`} />
+        <select aria-label="Status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className={filterClass}>
+          <option value="">Any status</option><option value="DRAFT">Draft</option><option value="PUBLISHED">Published</option><option value="ARCHIVED">Archived</option>
+        </select>
       </div>
-      <p className="mt-3 text-2xl font-bold text-slate-800">{value}</p>
-    </div>
+      <section className="rounded-xl border border-slate-200 bg-white">
+        <DataTable columns={["Title", "Audience", "Category", "Shown", "Status", "Updated", "Actions"]} isLoading={isLoading} hasRows={rows.length > 0} emptyMessage="No notices yet.">
+          {rows.map((row) => (
+            <tr key={row.id} className="border-b border-slate-100">
+              <td className="px-4 py-3"><button onClick={() => setViewing(row)} className="text-left font-medium text-slate-800 hover:text-blue-700">{row.isPinned ? "📌 " : ""}{row.title}</button>
+                <span className="block text-xs text-slate-500">{row.display === "POPUP" ? "Pop-up" : "Board"}{row.emailedCount ? ` · emailed to ${row.emailedCount}` : ""}</span></td>
+              <td className="px-4 py-3">{audienceName(row.audience)}</td>
+              <td className="px-4 py-3">{label(row.category)}</td>
+              <td className="px-4 py-3 text-xs">{row.publishAt ? `from ${formatDateTime(row.publishAt)}` : "now"}{row.expiresAt ? <span className="block">until {formatDateTime(row.expiresAt)}</span> : ""}</td>
+              <td className="px-4 py-3"><span className={`rounded-full px-3 py-1 text-xs font-medium ${STATUS_STYLES[row.status]}`}>{liveState(row)}</span></td>
+              <td className="px-4 py-3 text-xs">{formatDateTime(row.updatedAt)}</td>
+              <td className="px-4 py-3">
+                <div className="flex flex-wrap gap-3">
+                  {can("notice.update") && <button onClick={() => setEditing({ notice: row })} className={linkButton} aria-label={`Edit ${row.title}`}>Edit</button>}
+                  {can("notice.approve") && row.status !== "PUBLISHED" && <button onClick={() => act(() => noticesApi.publish(row.id), "Notice published.")} className={linkButton}>Publish</button>}
+                  {can("notice.approve") && row.status === "PUBLISHED" && <button onClick={() => act(() => noticesApi.archive(row.id), "Notice archived.")} className={linkButton}>Archive</button>}
+                  {can("notice.delete") && <button onClick={() => window.confirm(`Delete "${row.title}"?`) && act(() => noticesApi.remove(row.id), "Notice deleted.")} className={dangerButton} aria-label={`Delete ${row.title}`}>Delete</button>}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </DataTable>
+      </section>
+      {editing && (
+        <QuickForm title={editing.notice ? "Edit Notice" : editing.publish ? "New Notice (publish now)" : "New Draft"} fields={fields(display)} onSubmit={save} onClose={() => setEditing(null)}
+          submitLabel={editing.publish ? "Publish" : "Save"}
+          initial={editing.notice
+            ? { ...editing.notice, publishAt: toLocalInput(editing.notice.publishAt), expiresAt: toLocalInput(editing.notice.expiresAt) }
+            : { category: "GENERAL", audience: "ALL", display: display || "BOARD" }} />
+      )}
+      {viewing && <NoticeView notice={viewing} onClose={() => setViewing(null)} />}
+    </SystemShell>
   );
 }

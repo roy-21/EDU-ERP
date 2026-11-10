@@ -1,259 +1,120 @@
 "use client";
-import { useState } from "react";
 
-const mockCourses = [
-  { id: 1, code: "CSE-101", name: "Introduction to Programming", totalMarks: 100, sections: ["A", "B"] },
-  { id: 2, code: "CSE-102", name: "Data Structures", totalMarks: 100, sections: ["A"] },
-  { id: 3, code: "BBA-201", name: "Principles of Marketing", totalMarks: 100, sections: ["A", "B", "C"] },
-];
+import { useCallback, useState } from "react";
+import { teachingApi } from "@/lib/academicsApi";
+import { useMe } from "@/lib/useMe";
+import { DataTable, ErrorBanner, NoAccess, SystemShell, filterClass, friendlyError, primaryButton, secondaryButton, useData } from "@/components/erp/ui";
 
-const mockStudents = [
-  { id: "STU-001", name: "Imran Ahmed", section: "A" },
-  { id: "STU-002", name: "Susmita Das", section: "A" },
-  { id: "STU-003", name: "Rahim Uddin", section: "A" },
-  { id: "STU-004", name: "Karim Hossain", section: "B" },
-  { id: "STU-005", name: "Fatima Begum", section: "B" },
-  { id: "STU-006", name: "Nasir Khan", section: "A" },
-  { id: "STU-007", name: "Priya Sharma", section: "B" },
-];
+const loadClasses = () => teachingApi.classes("exams");
 
-const markComponents = [
-  { key: "midterm", label: "Midterm", max: 30 },
-  { key: "final", label: "Final", max: 50 },
-  { key: "assignment", label: "Assignment", max: 10 },
-  { key: "attendance", label: "Attendance", max: 5 },
-  { key: "quiz", label: "Quiz", max: 5 },
-];
+function MarksSheet({ assessmentId, canUnlock, onChanged }) {
+  const load = useCallback(() => teachingApi.marksSheet(assessmentId), [assessmentId]);
+  const { data, error, reload } = useData(load);
+  const [edits, setEdits] = useState({});
+  const [maxMarks, setMaxMarks] = useState(null);
+  const [message, setMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
 
-export default function MarksEntryPage() {
-  const [selectedCourse, setSelectedCourse] = useState(mockCourses[0]);
-  const [selectedSection, setSelectedSection] = useState("A");
-  const [marksData, setMarksData] = useState({});
-  const [saveStatus, setSaveStatus] = useState(null);
+  const valueOf = (student) => edits[student.studentId] ?? { marks: student.marks ?? "", isAbsent: student.isAbsent };
+  const set = (student, change) => setEdits({ ...edits, [student.studentId]: { ...valueOf(student), ...change } });
+  const locked = Boolean(data?.assessment.lockedAt);
+  const full = maxMarks ?? data?.assessment.maxMarks;
 
-  const filteredStudents = mockStudents.filter(s => s.section === selectedSection);
-
-  const getMarks = (studentId, component) => {
-    const key = `${studentId}-${component}`;
-    return marksData[key] ?? "";
-  };
-
-  const setMarks = (studentId, component, value) => {
-    const key = `${studentId}-${component}`;
-    const numValue = value === "" ? "" : parseInt(value);
-    
-    // Validate marks
-    if (numValue !== "" && (numValue < 0 || numValue > markComponents.find(c => c.key === component)?.max)) {
-      return;
+  const run = async (work, text) => {
+    setSaveError("");
+    setMessage("");
+    try {
+      await work();
+      setMessage(text);
+      setEdits({});
+      setMaxMarks(null);
+      reload();
+      onChanged();
+    } catch (err) {
+      setSaveError(friendlyError(err));
     }
-    
-    setMarksData(prev => ({ ...prev, [key]: numValue }));
   };
 
-  const getTotal = (studentId) => {
-    let total = 0;
-    let hasAllMarks = true;
-    markComponents.forEach(comp => {
-      const marks = getMarks(studentId, comp.key);
-      if (marks === "") {
-        hasAllMarks = false;
-      } else {
-        total += marks;
-      }
-    });
-    return hasAllMarks ? total : "-";
-  };
+  const save = () => run(() => teachingApi.saveMarks(assessmentId, {
+    maxMarks: Number(full),
+    marks: Object.entries(edits).map(([studentId, value]) => ({ studentId, isAbsent: value.isAbsent, marks: value.isAbsent || value.marks === "" ? null : Number(value.marks) })),
+  }), "Marks saved.");
 
-  const getGrade = (total) => {
-    if (total === "-") return "-";
-    if (total >= 80) return "A+";
-    if (total >= 75) return "A";
-    if (total >= 70) return "A-";
-    if (total >= 65) return "B+";
-    if (total >= 60) return "B";
-    if (total >= 55) return "B-";
-    if (total >= 50) return "C+";
-    if (total >= 45) return "C";
-    if (total >= 40) return "D";
-    return "F";
-  };
-
-  const handleSave = () => {
-    setSaveStatus("saving");
-    setTimeout(() => {
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus(null), 3000);
-    }, 1500);
-  };
-
-  const handleBulkFill = (component, value) => {
-    const newData = { ...marksData };
-    filteredStudents.forEach(student => {
-      const key = `${student.id}-${component}`;
-      newData[key] = value;
-    });
-    setMarksData(newData);
-  };
+  const missing = (data?.students || []).filter((student) => { const v = valueOf(student); return !v.isAbsent && v.marks === ""; }).length;
 
   return (
-    <div className="p-6 h-[calc(100vh-4rem)]  bg-slate-50">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Marks Entry</h1>
-          <p className="text-sm text-slate-500 mt-1">Enter and manage student marks</p>
+    <div className="space-y-3">
+      {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      {saveError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{saveError}</p>}
+      {message && <p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-700">{message}</p>}
+      {data && (
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-sm text-slate-700">Full Marks<input type="number" min="1" value={full} disabled={locked} onChange={(e) => setMaxMarks(e.target.value)} className={`${filterClass} block w-28`} /></label>
+          <p className="text-sm text-slate-600">{data.assessment.examName} · counts {data.assessment.weight}% · {missing} without marks</p>
+          {!locked && <button onClick={save} disabled={Object.keys(edits).length === 0 && maxMarks === null} className={`${primaryButton} disabled:opacity-50`}>Save Marks</button>}
+          {!locked && <button onClick={() => run(() => teachingApi.lock(assessmentId), "Marks locked.")} disabled={Object.keys(edits).length > 0} className={secondaryButton} title="Save first">Lock Marks</button>}
+          {locked && <p className="text-sm font-medium text-slate-700">Locked{canUnlock ? "" : ". Ask an approver to unlock."}</p>}
+          {locked && canUnlock && <button onClick={() => run(() => teachingApi.unlock(assessmentId), "Marks unlocked.")} className={secondaryButton}>Unlock</button>}
         </div>
-        <div className="flex gap-2">
-          <button className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 font-medium text-sm transition-colors">
-            📥 Import Excel
-          </button>
-          <button 
-            onClick={handleSave}
-            disabled={saveStatus === "saving"}
-            className={`px-4 py-2 rounded-lg font-medium text-sm transition-colors ${
-              saveStatus === "saved" 
-                ? "bg-green-600 text-white" 
-                : saveStatus === "saving"
-                ? "bg-blue-400 text-white cursor-wait"
-                : "bg-blue-600 text-white hover:bg-blue-700"
-            }`}
-          >
-            {saveStatus === "saving" ? "⏳ Saving..." : saveStatus === "saved" ? "✅ Saved!" : "💾 Save Marks"}
-          </button>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg border border-slate-200 p-4 mb-6">
-        <div className="flex flex-wrap gap-4 items-end">
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Course</label>
-            <select
-              value={selectedCourse.id}
-              onChange={(e) => setSelectedCourse(mockCourses.find(c => c.id === parseInt(e.target.value)))}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-md outline-none"
-            >
-              {mockCourses.map(course => (
-                <option key={course.id} value={course.id}>{course.code} - {course.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="w-32">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Section</label>
-            <select
-              value={selectedSection}
-              onChange={(e) => setSelectedSection(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-md outline-none"
-            >
-              {selectedCourse.sections.map(sec => (
-                <option key={sec} value={sec}>Section {sec}</option>
-              ))}
-            </select>
-          </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-xs text-blue-600">Total Students</p>
-            <p className="text-lg font-bold text-blue-800">{filteredStudents.length}</p>
-          </div>
-          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-            <p className="text-xs text-green-600">Marks Entered</p>
-            <p className="text-lg font-bold text-green-800">
-              {filteredStudents.filter(s => getTotal(s.id) !== "-").length}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Marks Entry Table */}
-      <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-slate-50">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase sticky left-0 bg-slate-50 z-10 min-w-[180px]">
-                  Student
-                </th>
-                {markComponents.map(comp => (
-                  <th key={comp.key} className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase min-w-[100px]">
-                    <div>{comp.label}</div>
-                    <div className="text-[10px] text-slate-400 font-normal">(Max: {comp.max})</div>
-                  </th>
-                ))}
-                <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase min-w-[80px]">
-                  Total
-                </th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase min-w-[60px]">
-                  Grade
-                </th>
-              </tr>
-              {/* Bulk Fill Row */}
-              <tr className="bg-blue-50">
-                <td className="px-4 py-2 text-xs text-blue-600 font-medium sticky left-0 bg-blue-50 z-10">
-                  Bulk Fill
-                </td>
-                {markComponents.map(comp => (
-                  <td key={comp.key} className="px-2 py-2">
-                    <input
-                      type="number"
-                      placeholder="0"
-                      onChange={(e) => handleBulkFill(comp.key, e.target.value === "" ? "" : parseInt(e.target.value))}
-                      className="w-full px-2 py-1 text-xs text-center border border-blue-200 rounded-md outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </td>
-                ))}
-                <td colSpan="2"></td>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredStudents.map((student, index) => {
-                const total = getTotal(student.id);
-                const grade = getGrade(total);
-                return (
-                  <tr key={student.id} className={`hover:bg-slate-50 ${total !== "-" ? "bg-green-50/30" : ""}`}>
-                    <td className="px-4 py-3 sticky left-0 bg-white z-10">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-xs font-medium text-slate-600">
-                          {index + 1}
-                        </span>
-                        <div>
-                          <p className="text-sm font-medium text-slate-800">{student.name}</p>
-                          <p className="text-xs text-slate-500">{student.id}</p>
-                        </div>
-                      </div>
-                    </td>
-                    {markComponents.map(comp => (
-                      <td key={comp.key} className="px-2 py-3">
-                        <input
-                          type="number"
-                          min="0"
-                          max={comp.max}
-                          value={getMarks(student.id, comp.key)}
-                          onChange={(e) => setMarks(student.id, comp.key, e.target.value)}
-                          placeholder="—"
-                          className="w-full px-2 py-1.5 text-sm text-center border border-slate-200 rounded-md outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
-                      </td>
-                    ))}
-                    <td className="px-4 py-3 text-center">
-                      <span className={`text-sm font-bold ${total !== "-" ? (total >= 50 ? "text-green-700" : "text-red-700") : "text-slate-400"}`}>
-                        {total}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`px-2 py-1 rounded-md text-xs font-bold ${
-                        grade === "F" ? "bg-red-100 text-red-700" :
-                        grade.startsWith("A") ? "bg-green-100 text-green-700" :
-                        grade === "-" ? "bg-slate-100 text-slate-400" :
-                        "bg-blue-100 text-blue-700"
-                      }`}>
-                        {grade}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
+      <DataTable columns={["Student ID", "Name", "Marks", "Absent"]} isLoading={!data && !error} hasRows={(data?.students || []).length > 0} emptyMessage="No active students." minWidth="min-w-[520px]">
+        {(data?.students || []).map((student) => {
+          const value = valueOf(student);
+          return (
+            <tr key={student.studentId} className="border-b border-slate-100">
+              <td className="px-4 py-2 font-mono text-xs text-slate-600">{student.studentNo}</td>
+              <td className="px-4 py-2 text-slate-800">{student.fullName}</td>
+              <td className="px-4 py-2">
+                <input type="number" min="0" max={full} step="0.5" aria-label={`Marks of ${student.fullName}`} value={value.isAbsent ? "" : value.marks}
+                  disabled={locked || value.isAbsent} onChange={(e) => set(student, { marks: e.target.value })}
+                  className={`w-24 rounded border px-2 py-1 text-sm ${Number(value.marks) > Number(full) ? "border-red-400" : "border-slate-300"}`} />
+              </td>
+              <td className="px-4 py-2"><input type="checkbox" aria-label={`${student.fullName} absent`} checked={value.isAbsent} disabled={locked} onChange={(e) => set(student, { isAbsent: e.target.checked })} /></td>
+            </tr>
+          );
+        })}
+      </DataTable>
     </div>
+  );
+}
+
+export default function MarksEntryPage() {
+  const { can, isReady } = useMe();
+  const { data: classes, error } = useData(loadClasses);
+  const [classId, setClassId] = useState("");
+  const klass = (classes || []).find((item) => item.id === classId) || (classes || [])[0];
+  const loadAssessments = useCallback(() => (klass ? teachingApi.assessments(klass.id) : Promise.resolve(null)), [klass]);
+  const { data: detail, reload } = useData(loadAssessments);
+  const [assessmentId, setAssessmentId] = useState("");
+
+  if (isReady && !can("examination.read", "examination.create")) return <NoAccess />;
+  const assessments = detail?.assessments || [];
+  const chosen = assessments.find((item) => item.id === assessmentId) || assessments[0];
+
+  return (
+    <SystemShell title="Marks Entry" subtitle="Enter each student's marks per exam, then lock them. Teachers see only their own classes." crumbs={[{ href: "/admin/examination", label: "Examinations" }]}>
+      <ErrorBanner message={error} />
+      {classes && classes.length === 0 && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">No classes to show.</p>}
+      {klass && (
+        <select aria-label="Class" value={klass.id} onChange={(e) => { setClassId(e.target.value); setAssessmentId(""); }} className={`${filterClass} min-w-[18rem]`}>
+          {classes.map((item) => <option key={item.id} value={item.id}>{item.courseCode} · {item.sectionLabel} · {item.sessionName}</option>)}
+        </select>
+      )}
+      {detail && assessments.length === 0 && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">This session has no exams yet. Add them on the Examinations page.</p>}
+      {assessments.length > 0 && (
+        <>
+          <div role="tablist" className="flex flex-wrap gap-2">
+            {assessments.map((item) => (
+              <button key={item.id} role="tab" aria-selected={chosen?.id === item.id} onClick={() => setAssessmentId(item.id)} className={chosen?.id === item.id ? primaryButton : secondaryButton}>
+                {item.examName} ({item.weight}%){item.lockedAt ? " 🔒" : ""}
+              </button>
+            ))}
+          </div>
+          <section className="rounded-xl border border-slate-200 bg-white p-4">
+            <MarksSheet key={chosen.id} assessmentId={chosen.id} canUnlock={can("examination.approve")} onChanged={reload} />
+          </section>
+        </>
+      )}
+    </SystemShell>
   );
 }

@@ -2,16 +2,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import FeatureNotice from "./FeatureNotice";
+import { useHostelBoard } from "./hostelStore";
 
 const statusStyles = {
-  Available: "bg-green-100 text-green-700",
-  Occupied: "bg-blue-100 text-blue-700",
-  Maintenance: "bg-orange-100 text-orange-700",
-  Reserved: "bg-purple-100 text-purple-700",
-  Allocated: "bg-green-100 text-green-700",
   Pending: "bg-yellow-100 text-yellow-700",
-  Approved: "bg-green-100 text-green-700",
-  Rejected: "bg-red-100 text-red-700",
   Published: "bg-green-100 text-green-700",
   Draft: "bg-slate-100 text-slate-700",
   "Checked In": "bg-blue-100 text-blue-700",
@@ -22,9 +17,6 @@ const statusStyles = {
 };
 
 const statusOptions = {
-  rooms: ["Available", "Occupied", "Maintenance"],
-  seats: ["Available", "Occupied", "Reserved"],
-  allocation: ["Pending", "Allocated", "Rejected"],
   meals: ["Draft", "Published"],
   visitors: ["Pending", "Checked In", "Checked Out"],
   fees: ["Pending", "Processing", "Paid", "Due"],
@@ -34,6 +26,7 @@ const money = (value) =>
   `৳${Number(value || 0).toLocaleString("en-BD")}`;
 
 export default function HostelList({ config }) {
+  const board = useHostelBoard();
   const [records, setRecords] = useState(config.records);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -77,12 +70,12 @@ export default function HostelList({ config }) {
 
   const total = records.length;
   const activeCount = records.filter((item) =>
-    ["Available", "Allocated", "Published", "Checked In", "Paid"].includes(
+    ["Published", "Checked In", "Paid"].includes(
       item.status
     )
   ).length;
   const pendingCount = records.filter((item) =>
-    ["Pending", "Reserved", "Draft", "Processing", "Due"].includes(
+    ["Pending", "Draft", "Processing", "Due"].includes(
       item.status
     )
   ).length;
@@ -90,18 +83,6 @@ export default function HostelList({ config }) {
   const getPrimaryInfo = (record) => {
     if (config.type === "fees") {
       return money(record.amount);
-    }
-
-    if (config.type === "rooms") {
-      return `${record.occupied || 0}/${record.capacity || 0} Seats`;
-    }
-
-    if (config.type === "seats") {
-      return record.student || record.room || "Not Assigned";
-    }
-
-    if (config.type === "allocation") {
-      return record.studentId || "N/A";
     }
 
     if (config.type === "meals") {
@@ -129,6 +110,15 @@ export default function HostelList({ config }) {
       ([key, value]) => !excluded.includes(key) && value !== undefined
     );
   };
+
+  if (board?.disabledBuiltIns.includes(config.type)) {
+    return (
+      <FeatureNotice
+        title={`${config.title} is turned off`}
+        message="A super admin can turn this feature back on from the control board."
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-6">

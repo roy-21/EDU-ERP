@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:backend": "npm --prefix apps/core-api run dev",
+    "build:backend": "npm --prefix apps/core-api run build",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

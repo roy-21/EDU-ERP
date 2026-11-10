@@ -1,7 +1,5 @@
-
-import HostelList from "../_components/HostelList";
-import { hostelPages } from "../_components/hostelData";
+import FeeManagement from "../_components/FeeManagement";
 
 export default function FeesPage() {
-  return <HostelList config={hostelPages.fees} />;
+  return <FeeManagement />;
 }

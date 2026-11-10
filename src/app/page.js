@@ -1,5 +1,6 @@
 
 import Link from "next/link";
+import PricingSection from "@/components/landing/PricingSection";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -71,14 +72,15 @@ export default function Home() {
             <Link href="#platform" className="text-sm font-medium text-slate-600 hover:text-blue-700">Platform</Link>
             <Link href="#modules" className="text-sm font-medium text-slate-600 hover:text-blue-700">Modules</Link>
             <Link href="#intelligence" className="text-sm font-medium text-slate-600 hover:text-blue-700">AI Intelligence</Link>
+            <Link href="#pricing" className="text-sm font-medium text-slate-600 hover:text-blue-700">Pricing</Link>
             <Link href="#about" className="text-sm font-medium text-slate-600 hover:text-blue-700">About</Link>
           </div>
 
           <div className="flex items-center gap-3">
-            <Link href="/admin" className="hidden text-sm font-semibold text-slate-700 hover:text-blue-700 sm:block">
-              Admin Panel
+            <Link href="/login" className="hidden text-sm font-semibold text-slate-700 hover:text-blue-700 sm:block">
+              Sign In
             </Link>
-            <Link href="/admin" className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200 transition hover:bg-blue-800">
+            <Link href="/register" className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200 transition hover:bg-blue-800">
               Get Started <ArrowUpRight size={16} />
             </Link>
           </div>
@@ -386,6 +388,8 @@ export default function Home() {
           ))}
         </div>
       </section>
+
+      <PricingSection />
 
       {/* Workflow */}
       <section id="about" className="bg-slate-50 py-24">

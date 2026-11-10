@@ -62,7 +62,6 @@ export const integrationPages = {
     description: "Manage payment provider connections and transaction integration.",
     records: [
       createIntegration("PAY-001", "SSLCommerz", "Payment Gateway", "SSLCommerz API", "Active", "2026-11-02 10:20 AM", "Online payment processing.", { provider: "SSLCommerz", currency: "BDT", environment: "Sandbox", transactions: 4520 }),
-      createIntegration("PAY-002", "bKash", "Payment Gateway", "bKash Checkout API", "Active", "2026-11-02 09:50 AM", "Mobile financial service integration.", { provider: "bKash", currency: "BDT", environment: "Sandbox", transactions: 3210 }),
       createIntegration("PAY-003", "Nagad", "Payment Gateway", "Nagad API", "Pending", "2026-10-29 11:30 AM", "Nagad payment integration.", { provider: "Nagad", currency: "BDT", environment: "Sandbox", transactions: 0 }),
     ],
   },

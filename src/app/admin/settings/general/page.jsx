@@ -1,3 +1,4 @@
+"use client";
 
 import SettingsForm from "../_components/SettingsForm";
 import { settingsPages } from "../_components/settingsData";

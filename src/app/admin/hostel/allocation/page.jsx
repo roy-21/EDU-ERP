@@ -1,7 +1,10 @@
-
-import HostelList from "../_components/HostelList";
-import { hostelPages } from "../_components/hostelData";
+import AllocationManagement from "../_components/AllocationManagement";
+import { HostelFeatureGate } from "../_components/hostelUi";
 
 export default function AllocationPage() {
-  return <HostelList config={hostelPages.allocation} />;
+  return (
+    <HostelFeatureGate slug="allocation" title="Student Allocation">
+      <AllocationManagement />
+    </HostelFeatureGate>
+  );
 }

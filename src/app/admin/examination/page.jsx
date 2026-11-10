@@ -1,132 +1,108 @@
 "use client";
-import { useState } from "react";
+
 import Link from "next/link";
+import { useCallback, useState } from "react";
+import { structureApi, teachingApi } from "@/lib/academicsApi";
+import { useMe } from "@/lib/useMe";
+import { DataTable, ErrorBanner, FormModal, NoAccess, SystemShell, TextField, dangerButton, filterClass, friendlyError, linkButton, primaryButton, secondaryButton, useData } from "@/components/erp/ui";
 
-const examStats = {
-  upcomingExams: 8,
-  ongoingExams: 2,
-  completedExams: 45,
-  pendingResults: 12,
-  totalStudents: 1250,
-  avgPassRate: 87.5
-};
+const loadSessions = () => structureApi.list("sessions");
 
-const recentExams = [
-  { id: 1, name: "Final Exam - CSE 2023", date: "2024-01-15", status: "Ongoing", students: 120, courses: 8 },
-  { id: 2, name: "Midterm - BBA Fall 2023", date: "2024-01-10", status: "Completed", students: 95, courses: 6 },
-  { id: 3, name: "Lab Final - EE 2023", date: "2024-01-20", status: "Scheduled", students: 60, courses: 4 },
-  { id: 4, name: "Makeup Exam - Dec 2023", date: "2024-01-08", status: "Completed", students: 25, courses: 10 },
-];
+function ExamForm({ exam, sessionId, remaining, onClose, onSaved }) {
+  const [form, setForm] = useState({ name: exam?.name || "", weight: String(exam?.weight ?? remaining), defaultMaxMarks: String(exam?.defaultMaxMarks ?? 100), startsOn: exam?.startsOn || "", endsOn: exam?.endsOn || "" });
+  const set = (key) => (value) => setForm((previous) => ({ ...previous, [key]: value }));
+  const handleSubmit = async () => {
+    const body = { name: form.name, weight: Number(form.weight), startsOn: form.startsOn || null, endsOn: form.endsOn || null };
+    if (exam) await teachingApi.updateExam(exam.id, body);
+    else await teachingApi.createExam({ ...body, sessionId, defaultMaxMarks: Number(form.defaultMaxMarks) });
+    onSaved();
+  };
+  return (
+    <FormModal title={exam ? `Edit ${exam.name}` : "New Exam"} submitLabel="Save" onSubmit={handleSubmit} onClose={onClose}>
+      <TextField id="exam-name" label="Name * (e.g. Midterm)" value={form.name} maxLength={100} onChange={set("name")} />
+      <TextField id="exam-weight" label={`Weight % * (${remaining}% left in this session)`} type="number" min="0" max="100" step="0.5" value={form.weight} onChange={set("weight")} />
+      {!exam && <TextField id="exam-max" label="Full Marks (each class can change it)" type="number" min="1" value={form.defaultMaxMarks} onChange={set("defaultMaxMarks")} />}
+      <TextField id="exam-start" label="Starts" type="date" value={form.startsOn} onChange={set("startsOn")} />
+      <TextField id="exam-end" label="Ends" type="date" value={form.endsOn} onChange={set("endsOn")} />
+      <p className="text-xs text-slate-500 sm:col-span-2">Every class in the session gets this exam. A student&apos;s course result is the weighted total of all exams, which must come to 100% before results can be published.</p>
+    </FormModal>
+  );
+}
 
-const quickActions = [
-  { title: "Create Exam Schedule", icon: "📅", href: "/admin/examination/schedule", color: "from-blue-500 to-blue-600" },
-  { title: "Generate Seat Plan", icon: "💺", href: "/admin/examination/seat-plan", color: "from-purple-500 to-purple-600" },
-  { title: "Enter Marks", icon: "✍️", href: "/admin/examination/marks-entry", color: "from-green-500 to-green-600" },
-  { title: "Publish Results", icon: "📊", href: "/admin/examination/result", color: "from-orange-500 to-orange-600" },
-  { title: "View Transcripts", icon: "📜", href: "/admin/examination/transcript", color: "from-teal-500 to-teal-600" },
-  { title: "Tabulation Sheet", icon: "📋", href: "/admin/examination/tabulation", color: "from-indigo-500 to-indigo-600" },
-  { title: "Improvement Exam", icon: "📈", href: "/admin/examination/improvement", color: "from-pink-500 to-pink-600" },
-  { title: "Retake Management", icon: "🔄", href: "/admin/examination/retake", color: "from-red-500 to-red-600" },
-  { title: "AI Grade Prediction", icon: "🤖", href: "/admin/examination/ai-prediction", color: "from-cyan-500 to-cyan-600" },
-];
+export default function ExaminationPage() {
+  const { can, isReady } = useMe();
+  const { data: sessions } = useData(loadSessions);
+  const [sessionId, setSessionId] = useState("");
+  const current = sessionId || sessions?.find((s) => s.isCurrent)?.id || sessions?.[0]?.id || "";
+  const load = useCallback(() => (current ? teachingApi.exams(current) : Promise.resolve([])), [current]);
+  const { data: exams, error, isLoading, reload } = useData(load);
+  const [modal, setModal] = useState(null);
+  const [notice, setNotice] = useState("");
+  const [actionError, setActionError] = useState("");
 
-export default function ExaminationDashboard() {
-  const [selectedExam, setSelectedExam] = useState(null);
+  if (isReady && !can("examination.read")) return <NoAccess />;
+  const total = (exams || []).reduce((sum, exam) => sum + exam.weight, 0);
+  const canManage = can("examination.approve");
+
+  const remove = async (exam) => {
+    if (!window.confirm(`Delete ${exam.name}?`)) return;
+    setActionError("");
+    try {
+      await teachingApi.deleteExam(exam.id);
+      setNotice(`${exam.name} deleted.`);
+      reload();
+    } catch (err) {
+      setActionError(friendlyError(err));
+    }
+  };
 
   return (
-    <div className="p-6 h-[calc(100vh-4rem)]  bg-slate-50">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">Examination Module</h1>
-          <p className="text-sm text-slate-500 mt-1">Manage exams, schedules, marks, and results</p>
-        </div>
-        <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm transition-colors">
-          + New Exam
-        </button>
+    <SystemShell
+      title="Examinations"
+      subtitle="Exams of a session and their weights. Marks are entered per class; results are worked out from the grading scale."
+      actions={
+        <>
+          <Link href="/admin/examination/marks-entry" className={secondaryButton}>Marks Entry</Link>
+          <Link href="/admin/examination/result" className={secondaryButton}>Results</Link>
+          {canManage && <button onClick={() => setModal({})} disabled={!current || total >= 100} className={`${primaryButton} disabled:opacity-50`}>New Exam</button>}
+        </>
+      }
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <select aria-label="Session" value={current} onChange={(e) => setSessionId(e.target.value)} className={filterClass}>
+          {(sessions || []).map((s) => <option key={s.id} value={s.id}>{s.name}{s.isCurrent ? " (current)" : ""}</option>)}
+        </select>
+        <p className={`text-sm ${total === 100 ? "text-green-700" : "text-amber-700"}`}>Weights: {total}% of 100%{total === 100 ? "" : ". Results publish only at 100%."}</p>
       </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        {[
-          { label: "Upcoming", value: examStats.upcomingExams, color: "bg-blue-50 border-blue-200 text-blue-700" },
-          { label: "Ongoing", value: examStats.ongoingExams, color: "bg-green-50 border-green-200 text-green-700" },
-          { label: "Completed", value: examStats.completedExams, color: "bg-slate-50 border-slate-200 text-slate-700" },
-          { label: "Pending Results", value: examStats.pendingResults, color: "bg-orange-50 border-orange-200 text-orange-700" },
-          { label: "Total Students", value: examStats.totalStudents, color: "bg-purple-50 border-purple-200 text-purple-700" },
-          { label: "Avg Pass Rate", value: `${examStats.avgPassRate}%`, color: "bg-teal-50 border-teal-200 text-teal-700" },
-        ].map((stat, i) => (
-          <div key={i} className={`p-4 rounded-lg border ${stat.color}`}>
-            <p className="text-xs font-medium opacity-80">{stat.label}</p>
-            <p className="text-2xl font-bold mt-1">{stat.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Quick Actions Grid */}
-      <div className="mb-8">
-        <h2 className="text-lg font-bold text-slate-700 mb-4">Quick Actions</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {quickActions.map((action, i) => (
-            <Link
-              key={i}
-              href={action.href}
-              className="bg-white rounded-lg border border-slate-200 p-4 hover:shadow-md transition-all group"
-            >
-              <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${action.color} flex items-center justify-center text-xl mb-3 group-hover:scale-110 transition-transform`}>
-                {action.icon}
-              </div>
-              <p className="text-sm font-medium text-slate-700">{action.title}</p>
-            </Link>
+      {sessions && sessions.length === 0 && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Create a session in Academic Structure first.</p>}
+      <ErrorBanner message={error || actionError} onDismiss={actionError ? () => setActionError("") : undefined} />
+      {notice && <p role="status" className="rounded-lg bg-green-50 p-3 text-sm text-green-700">{notice}</p>}
+      <section className="rounded-xl border border-slate-200 bg-white">
+        <DataTable columns={["Exam", "Weight", "Full Marks", "Dates", "Classes", "Marks Locked", "Actions"]} isLoading={isLoading} hasRows={(exams || []).length > 0} emptyMessage="No exams in this session." minWidth="min-w-[760px]">
+          {(exams || []).map((exam) => (
+            <tr key={exam.id} className="border-b border-slate-100">
+              <td className="px-4 py-3 font-medium text-slate-800">{exam.name}</td>
+              <td className="px-4 py-3 text-slate-600">{exam.weight}%</td>
+              <td className="px-4 py-3 text-slate-600">{exam.defaultMaxMarks}</td>
+              <td className="px-4 py-3 text-slate-600">{exam.startsOn ? `${exam.startsOn} to ${exam.endsOn || "?"}` : "—"}</td>
+              <td className="px-4 py-3 text-slate-600">{exam.classes}</td>
+              <td className="px-4 py-3 text-slate-600">{exam.locked} of {exam.classes}</td>
+              <td className="px-4 py-3">
+                {canManage && (
+                  <div className="flex gap-3">
+                    <button onClick={() => setModal({ exam })} aria-label={`Edit ${exam.name}`} className={linkButton}>Edit</button>
+                    <button onClick={() => remove(exam)} aria-label={`Delete ${exam.name}`} className={dangerButton}>Delete</button>
+                  </div>
+                )}
+              </td>
+            </tr>
           ))}
-        </div>
-      </div>
-
-      {/* Recent Exams Table */}
-      <div className="bg-white rounded-lg border border-slate-200">
-        <div className="p-4 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="font-bold text-slate-700">Recent Examinations</h2>
-          <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">View All</button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-slate-50">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Exam Name</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Date</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Students</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Courses</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {recentExams.map(exam => (
-                <tr key={exam.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-sm font-medium text-slate-800">{exam.name}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{exam.date}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      exam.status === "Ongoing" ? "bg-green-100 text-green-700" :
-                      exam.status === "Completed" ? "bg-slate-100 text-slate-700" :
-                      "bg-blue-100 text-blue-700"
-                    }`}>
-                      {exam.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{exam.students}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{exam.courses}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-2">
-                      <button className="text-xs text-blue-600 hover:text-blue-700 font-medium">View</button>
-                      <button className="text-xs text-slate-500 hover:text-slate-700">Edit</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+        </DataTable>
+      </section>
+      {modal && (
+        <ExamForm exam={modal.exam} sessionId={current} remaining={100 - total + (modal.exam?.weight || 0)} onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); setNotice("Exam saved."); reload(); }} />
+      )}
+    </SystemShell>
   );
 }

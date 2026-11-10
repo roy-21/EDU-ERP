@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { systemService } from "@/lib/erpServices";
 
 export default function GradingConfigPage() {
   // Initial state holding all grading configuration data
@@ -46,6 +47,25 @@ export default function GradingConfigPage() {
     }
   });
 
+  const [saving, setSaving] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  // Load existing configuration from Core ERP Backend
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const res = await systemService.getGradingConfig();
+        const data = res?.data || res;
+        if (data && data.systemType) {
+          setConfig(data);
+        }
+      } catch (err) {
+        console.error("Failed to load grading config", err);
+      }
+    };
+    loadConfig();
+  }, []);
+
   // Handler to update top-level config fields
   const handleConfigChange = (key, value) => {
     setConfig({ ...config, [key]: value });
@@ -88,25 +108,62 @@ export default function GradingConfigPage() {
   };
 
   // Submit handler to send metadata to backend
-  const handleSaveConfig = () => {
-    console.log("Saving Grading Configuration Metadata:", JSON.stringify(config, null, 2));
-    alert("Grading Configuration JSON logged to console!");
+  const handleSaveConfig = async () => {
+    setSaving(true);
+    try {
+      await systemService.updateGradingConfig(config);
+      setNotification({
+        type: "success",
+        message: "Grading policy saved for your institution."
+      });
+    } catch (err) {
+      setNotification({
+        type: "error",
+        message: `Not saved: ${err.message}`
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <div className="p-6 max-w-6xl mx-auto h-[calc(100vh-4rem)] overflow-y-auto">
       
+      {/* Toast Notification */}
+      {notification && (
+        <div className={`mb-6 p-4 rounded-xl flex items-center justify-between text-sm shadow-sm transition-all ${
+          notification.type === "success" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" :
+          "bg-rose-50 text-rose-800 border border-rose-200"
+        }`}>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">{notification.type === "success" ? "Success:" : "Error:"}</span>
+            <span>{notification.message}</span>
+          </div>
+          <button onClick={() => setNotification(null)} className="text-xs font-bold opacity-60 hover:opacity-100">✕</button>
+        </div>
+      )}
+
       {/* Page Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Academic Grading Configuration</h1>
-          <p className="text-sm text-slate-500 mt-1">Define how student performances are evaluated, graded, and calculated.</p>
+          <div className="flex items-center gap-3">
+            <span className="p-2 bg-indigo-100 text-indigo-700 rounded-lg text-lg font-bold">🎓</span>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">Academic Grading Configuration</h1>
+              <p className="text-sm text-slate-500 mt-0.5">Define grading scale, CGPA calculation formula, retake rules & marks distribution.</p>
+            </div>
+          </div>
         </div>
         <button
           onClick={handleSaveConfig}
-          className="px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 shadow-sm flex items-center gap-2"
+          disabled={saving}
+          className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 shadow-md flex items-center gap-2 transition-all"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+          {saving ? (
+            <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+          ) : (
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+          )}
           Save Grading System
         </button>
       </div>

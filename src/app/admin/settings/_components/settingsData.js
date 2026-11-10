@@ -76,6 +76,7 @@ export const settingsMenu = [
 
 export const settingsPages = {
   general: {
+    section: "general",
     title: "General Settings",
     description: "Configure general system preferences.",
     fields: [
@@ -113,6 +114,7 @@ export const settingsPages = {
   },
 
   institution: {
+    section: "institution",
     title: "Institution Profile",
     description: "Manage institution identity and contact information.",
     fields: [
@@ -156,6 +158,7 @@ export const settingsPages = {
   },
 
   calendar: {
+    section: "calendar",
     title: "Academic Calendar",
     description: "Configure the academic year and semester dates.",
     fields: [
@@ -187,6 +190,7 @@ export const settingsPages = {
   },
 
   timezone: {
+    section: "timezone",
     title: "Timezone Settings",
     description: "Configure system timezone and date format.",
     fields: [
@@ -228,6 +232,7 @@ export const settingsPages = {
   },
 
   language: {
+    section: "language",
     title: "Language Settings",
     description: "Configure application language preferences.",
     fields: [
@@ -252,6 +257,7 @@ export const settingsPages = {
   },
 
   theme: {
+    section: "theme",
     title: "Theme Settings",
     description: "Configure the default application appearance.",
     fields: [
@@ -282,6 +288,7 @@ export const settingsPages = {
   },
 
   branding: {
+    section: "branding",
     title: "Branding Settings",
     description: "Manage institution branding and identity.",
     fields: [
@@ -313,6 +320,7 @@ export const settingsPages = {
   },
 
   logo: {
+    section: "logo",
     title: "Logo Settings",
     description: "Upload and manage institution visual assets.",
     fields: [
@@ -338,6 +346,7 @@ export const settingsPages = {
   },
 
   smtp: {
+    section: "smtp",
     title: "SMTP Settings",
     description: "Configure outgoing email server settings.",
     fields: [
@@ -381,6 +390,7 @@ export const settingsPages = {
   },
 
   sms: {
+    section: "sms",
     title: "SMS Gateway",
     description: "Configure SMS provider credentials and sender settings.",
     fields: [
@@ -423,6 +433,7 @@ export const settingsPages = {
   },
 
   payment: {
+    section: "payment",
     title: "Payment Gateway",
     description: "Configure payment provider and transaction settings.",
     fields: [
@@ -466,6 +477,7 @@ export const settingsPages = {
   },
 
   backup: {
+    section: "backup",
     title: "Backup Settings",
     description: "Configure backup schedule and retention preferences.",
     fields: [

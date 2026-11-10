@@ -2,8 +2,19 @@
 
 export const sidebarModules = [
   {
+    id: "platform",
+    title: "Platform (Super Admin)",
+    isMainModule: true,
+    icon: "🌐",
+    requiresRole: ["SUPER_ADMIN"],
+    subMenus: [
+      { title: "Institutions, Requests & Prices", href: "/admin/platform" },
+    ],
+  },
+  {
     id: 1,
     title: "1. System Configuration",
+    moduleId: "system",
     isMainModule: true, // এটি লাল রঙে দেখাবে
     icon: "⚙️",
     subMenus: [
@@ -16,6 +27,16 @@ export const sidebarModules = [
         title: "(ii) Dynamic Role & Permission Management",
         href: "/admin/system/role-permission",
         notes: ["Unlimited Role Create", "Role Hierarchy", "Permission Matrix", "Module-wise Access", "Page-wise Access", "API Permission", "Field-level Permission", "Data Ownership", "Approval Permission", "Custom Dashboard Permission"]
+      },
+      {
+        title: "Users & Accounts",
+        href: "/admin/system/users",
+        requires: "system.manage_users",
+      },
+      {
+        title: "Feature Builder",
+        href: "/admin/system/features",
+        requires: "system.manage_features",
       },
       {
         title: "(iii) Dynamic Table Builder",
@@ -32,9 +53,14 @@ export const sidebarModules = [
   {
     id: 2,
     title: "2. Institution Configuration",
+    moduleId: "institution",
     isMainModule: true,
     icon: "🏛️",
     subMenus: [
+      {
+        title: "Academic Structure",
+        href: "/admin/institution/academic",
+      },
       {
         title: "(v) Campus Management",
         href: "/admin/institution/campus",
@@ -47,22 +73,22 @@ export const sidebarModules = [
       },
       {
         title: "(vii) Department Management",
-        href: "/admin/institution/department",
+        href: "/admin/institution/academic?tab=departments",
         notes: ["Department Code", "Program", "Degree", "Credit", "Duration"]
       },
       {
         title: "(viii) Batch Management",
-        href: "/admin/institution/batch",
+        href: "/admin/institution/academic?tab=sections",
         notes: ["Batch Year", "Semester", "Section", "Shift", "Session"]
       },
       {
         title: "(ix) Section Management",
-        href: "/admin/institution/section",
+        href: "/admin/institution/academic?tab=sections",
         notes: ["Section Capacity", "Teacher Assign", "Routine", "Room Assign"]
       },
       {
         title: "(x) Course Management",
-        href: "/admin/institution/course",
+        href: "/admin/institution/academic?tab=courses",
         notes: ["Course Code", "Credit", "Prerequisite", "Teacher", "Syllabus", "Course Outcome"]
       }
     ]
@@ -70,6 +96,7 @@ export const sidebarModules = [
   {
     id: 3,
     title: "3. Student Management",
+    moduleId: "student",
     isMainModule: true,
     icon: "🎓",
     subMenus: [
@@ -97,6 +124,7 @@ export const sidebarModules = [
   {
     id: "3.5", // Used 3.5 to keep it logically between Student and Teacher
     title: "3.5 Guardian Management",
+    moduleId: "guardian",
     isMainModule: true, 
     icon: "👨‍👩‍👧‍👦",
     subMenus: [
@@ -125,6 +153,7 @@ export const sidebarModules = [
   {
     id: 4,
     title: "4. Teacher Management",
+    moduleId: "teacher",
     isMainModule: true,
     icon: "👨‍🏫",
     subMenus: [
@@ -148,6 +177,7 @@ export const sidebarModules = [
   {
     id: 5,
     title: "5. Attendance Module",
+    moduleId: "attendance",
     isMainModule: true,
     icon: "📋",
     subMenus: [
@@ -161,6 +191,7 @@ export const sidebarModules = [
   {
     id: 6,
     title: "6. Examination Module",
+    moduleId: "examination",
     isMainModule: true,
     icon: "📝",
     subMenus: [
@@ -174,6 +205,7 @@ export const sidebarModules = [
   {
     id: 7,
     title: "7. Assignment & LMS",
+    moduleId: "lms",
     isMainModule: true,
     icon: "📖",
     subMenus: [
@@ -187,6 +219,7 @@ export const sidebarModules = [
   {
     id: 8,
     title: "8. Digital Classroom & Learning Hub",
+    moduleId: "classroom",
     isMainModule: true,
     icon: "💻",
     subMenus: [
@@ -200,6 +233,7 @@ export const sidebarModules = [
   {
     id: 9,
     title: "9. Library Management",
+    moduleId: "library",
     isMainModule: true,
     icon: "📚",
     subMenus: [
@@ -213,6 +247,7 @@ export const sidebarModules = [
   {
     id: 10,
     title: "10. Finance & Billing",
+    moduleId: "finance",
     isMainModule: true,
     icon: "💰",
     subMenus: [
@@ -226,6 +261,7 @@ export const sidebarModules = [
   {
     id: 11,
     title: "11. Scholarship Management",
+    moduleId: "scholarship",
     isMainModule: true,
     icon: "🏅",
     subMenus: [
@@ -239,6 +275,7 @@ export const sidebarModules = [
   {
     id: 12,
     title: "12. Application Management",
+    moduleId: "application",
     isMainModule: true,
     icon: "📄",
     subMenus: [
@@ -252,6 +289,7 @@ export const sidebarModules = [
   {
     id: 13,
     title: "13. Objection Management",
+    moduleId: "objection",
     isMainModule: true,
     icon: "⚠️",
     subMenus: [
@@ -265,6 +303,7 @@ export const sidebarModules = [
   {
     id: 14,
     title: "14. Voting Management",
+    moduleId: "voting",
     isMainModule: true,
     icon: "🗳️",
     subMenus: [
@@ -278,12 +317,13 @@ export const sidebarModules = [
   {
     id: 15,
     title: "15. Research Management",
+    moduleId: "research",
     isMainModule: true,
     icon: "🔬",
     subMenus: [
       {
         title: "Research Features",
-        href: "/admin/research/features",
+        href: "/admin/research",
         notes: ["Publication", "Conference", "Patent", "Research Grant", "Research Group", "Citation"]
       }
     ]
@@ -291,6 +331,7 @@ export const sidebarModules = [
   {
     id: 16,
     title: "16. HR Management",
+    moduleId: "hr",
     isMainModule: true,
     icon: "🧑‍💼",
     subMenus: [
@@ -304,19 +345,42 @@ export const sidebarModules = [
   {
     id: 17,
     title: "17. Hostel Management",
+    moduleId: "hostel",
     isMainModule: true,
     icon: "🏨",
     subMenus: [
       {
         title: "Hostel Features",
         href: "/admin/hostel",
-        notes: ["Room", "Seat", "Allocation", "Meal", "Visitor", "Fee"]
+        notes: ["Room", "Seat", "Allocation", "Maintenance", "Meal", "Visitor", "Fee", "Reports", "Audit Log"]
+      },
+      {
+        title: "Due Rent",
+        href: "/admin/hostel/due-rent",
+        permission: "view_due_rent",
+        badge: "dueRent"
+      },
+      {
+        title: "Rent Invoices",
+        href: "/admin/hostel/invoices",
+        permission: "manage_payments"
+      },
+      {
+        title: "Rent Settings",
+        href: "/admin/hostel/rent-settings",
+        permission: "configure_rent"
+      },
+      {
+        title: "Rent Notifications",
+        href: "/admin/hostel/notifications",
+        permission: "send_reminders"
       }
     ]
   },
   {
     id: 18,
     title: "18. Transport Management",
+    moduleId: "transport",
     isMainModule: true,
     icon: "🚌",
     subMenus: [
@@ -330,19 +394,21 @@ export const sidebarModules = [
   {
     id: 19,
     title: "19. Inventory Management",
+    moduleId: "inventory",
     isMainModule: true,
     icon: "📦",
     subMenus: [
       {
         title: "Inventory Features",
         href: "/admin/inventory",
-        notes: ["Computer", "Lab Equipment", "Furniture", "Stationery", "Asset Tracking", "Barcode"]
+        notes: ["Items & Stock", "Stock Ledger", "Purchases", "Batches & Expiry", "Transfers", "Assets", "Stores", "Barcode", "Reports"]
       }
     ]
   },
   {
     id: 20,
     title: "20. Notice Management",
+    moduleId: "notice",
     isMainModule: true,
     icon: "📢",
     subMenus: [
@@ -356,6 +422,7 @@ export const sidebarModules = [
   {
     id: 21,
     title: "21. Certificate Management",
+    moduleId: "certificate",
     isMainModule: true,
     icon: "📜",
     subMenus: [
@@ -369,6 +436,7 @@ export const sidebarModules = [
   {
     id: 22,
     title: "22. Document Management",
+    moduleId: "document",
     isMainModule: true,
     icon: "📁",
     subMenus: [
@@ -382,6 +450,7 @@ export const sidebarModules = [
   {
     id: 23,
     title: "23. AI Analytics Engine",
+    moduleId: "ai-analytics",
     isMainModule: true,
     icon: "🧠",
     subMenus: [
@@ -395,6 +464,7 @@ export const sidebarModules = [
   {
     id: 24,
     title: "24. Reports & BI Dashboard",
+    moduleId: "reports",
     isMainModule: true,
     icon: "📈",
     subMenus: [
@@ -408,6 +478,7 @@ export const sidebarModules = [
   {
     id: 25,
     title: "25. Notification Center",
+    moduleId: "notification",
     isMainModule: true,
     icon: "🔔",
     subMenus: [
@@ -421,6 +492,7 @@ export const sidebarModules = [
   {
     id: 26,
     title: "26. API & Integration",
+    moduleId: "api",
     isMainModule: true,
     icon: "🔗",
     subMenus: [
@@ -434,12 +506,13 @@ export const sidebarModules = [
   {
     id: 27,
     title: "27. Security Center",
+    moduleId: "settings",
     isMainModule: true,
     icon: "🔒",
     subMenus: [
       {
         title: "Security Features",
-        href: "/admin/security",
+        href: "/admin/settings/security",
         notes: ["2FA", "Login History", "Device Tracking", "Audit Log", "IP Restriction", "Encryption", "Backup", "Recovery"]
       }
     ]
@@ -447,6 +520,7 @@ export const sidebarModules = [
   {
     id: 28,
     title: "28. System Monitoring",
+    moduleId: "monitoring",
     isMainModule: true,
     icon: "👇",
     subMenus: [
@@ -460,6 +534,7 @@ export const sidebarModules = [
   {
     id: 29,
     title: "29. Dynamic Workflow Engine",
+    moduleId: "workflow",
     isMainModule: true,
     icon: "⚡",
     subMenus: [
@@ -473,6 +548,7 @@ export const sidebarModules = [
   {
     id: 30,
     title: "30. Data Import / Export",
+    moduleId: "import-export",
     isMainModule: true,
     icon: "🔄",
     subMenus: [
@@ -486,9 +562,15 @@ export const sidebarModules = [
   {
     id: 31,
     title: "31. Settings",
+    moduleId: "settings",
     isMainModule: true,
     icon: "🛠️",
     subMenus: [
+      {
+        title: "Subscription & Modules",
+        href: "/admin/settings/subscription",
+        requiresRole: ["ADMIN", "SUPER_ADMIN"],
+      },
       {
         title: "General Settings",
         href: "/admin/settings/general",
@@ -499,6 +581,7 @@ export const sidebarModules = [
   {
     id: 32,
     title: "32. AI Voice Call & Message Assistant",
+    moduleId: "voice-ai",
     isMainModule: true,
     icon: "📞",
     subMenus: [

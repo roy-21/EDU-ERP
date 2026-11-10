@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  # Database for Core ERP
+  erp-postgres:
+    image: postgres:16-alpine
+    container_name: erp-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: erp_user
+      POSTGRES_PASSWORD: erp_secret
+      POSTGRES_DB: erp_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - erp_pgdata:/var/lib/postgresql/data
+      - ./apps/core-api/src/database/schema.sql:/docker-entrypoint-initdb.d/01_erp_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp_user -d erp_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Database for AI Backend (PostgreSQL + pgvector)
+  ai-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ai-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ai_user
+      POSTGRES_PASSWORD: ai_secret
+      POSTGRES_DB: ai_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - ai_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_user -d ai_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Database for Voice Assistant Backend
+  voice-postgres:
+    image: postgres:16-alpine
+    container_name: voice-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: voice_user
+      POSTGRES_PASSWORD: voice_secret
+      POSTGRES_DB: voice_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - voice_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voice_user -d voice_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Shared Redis for Queues & Caching
+  redis:
+    image: redis:7-alpine
+    container_name: erp-redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  # Core ERP Backend Service
+  core-api:
+    build:
+      context: ./apps/core-api
+      dockerfile: Dockerfile
+    container_name: erp-core-api
+    restart: always
+    depends_on:
+      erp-postgres:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      ERP_DATABASE_URL: postgresql://erp_user:erp_secret@erp-postgres:5432/erp_db
+      JWT_SECRET: super_secret_jwt_access_key_change_in_production_32char
+      SERVICE_SECRET_AI: ai_service_internal_secret_key_9901
+      SERVICE_SECRET_VOICE: voice_service_internal_secret_key_8802
+    ports:
+      - "4000:4000"
+
+  # AI Backend Service
+  ai-api:
+    build:
+      context: ./apps/ai-api
+      dockerfile: Dockerfile
+    container_name: erp-ai-api
+    restart: always
+    depends_on:
+      ai-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      AI_PORT: 8000
+      AI_DATABASE_URL: postgresql://ai_user:ai_secret@ai-postgres:5432/ai_db
+      REDIS_URL: redis://redis:6379/0
+      CORE_ERP_API_URL: http://core-api:4000/api/v1
+    ports:
+      - "8000:8000"
+
+  # Voice Assistant Backend Service
+  voice-api:
+    build:
+      context: ./apps/voice-api
+      dockerfile: Dockerfile
+    container_name: erp-voice-api
+    restart: always
+    depends_on:
+      voice-postgres:
+        condition: service_healthy
+    environment:
+      VOICE_PORT: 8050
+      VOICE_DATABASE_URL: postgresql://voice_user:voice_secret@voice-postgres:5432/voice_db
+      CORE_ERP_API_BASE: http://core-api:4000/api/v1
+    ports:
+      - "8050:8050"
+
+volumes:
+  erp_pgdata:
+  ai_pgdata:
+  voice_pgdata:
+

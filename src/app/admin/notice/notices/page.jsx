@@ -1,7 +1,5 @@
-
-import NoticeList from "../_components/NoticeList";
-import { noticePages } from "../_components/noticeData";
+import NoticeManager from "../_components/NoticeList";
 
 export default function NoticesPage() {
-  return <NoticeList config={noticePages.notices} />;
+  return <NoticeManager title="Notices" />;
 }
