@@ -34,7 +34,7 @@ export const unitCost = (value: unknown, label: string): number => {
   return r4(result);
 };
 
-const skuOf = (value: unknown, label: string, max = 40) => {
+export const skuOf = (value: unknown, label: string, max = 40) => {
   const result = text(value, label, max).toUpperCase();
   if (result && !/^[A-Z0-9][A-Z0-9._-]*$/.test(result)) fail(400, `${label} may use letters, numbers, dots, dashes and underscores.`);
   return result;
@@ -47,12 +47,18 @@ const barcodeOf = (value: unknown) => {
   return result;
 };
 
-const shortCode = () => newId().replace(/-/g, "").slice(0, 6).toUpperCase();
+export const shortCode = () => newId().replace(/-/g, "").slice(0, 6).toUpperCase();
 export const docNo = (prefix: string) => `${prefix}-${todayBd().slice(2).replace(/-/g, "")}-${shortCode()}`;
 
 const PREFIX: Record<string, string> = {
   OPENING: "OPN", RECEIPT: "GRN", ISSUE: "ISS", RETURN: "RTN", ADJUSTMENT: "ADJ", DAMAGE: "DMG", LOSS: "LOS", REVERSAL: "REV",
+  CONSUMPTION: "CON", WASTAGE: "WST",
 };
+
+// What stock was used for, so spending can be reported by purpose.
+export const expenseCategoryOf = (value: unknown) => text(value, "Expense category", 60);
+
+export const STORE_KINDS = ["STORE", "WAREHOUSE", "KITCHEN", "DEPARTMENT", "LAB", "OFFICE", "OTHER"] as const;
 
 // ---- Stores -----------------------------------------------------------------------
 
@@ -60,6 +66,7 @@ const storeFromRow = (row: any) => ({
   id: row.id,
   code: row.code,
   name: row.name,
+  kind: row.kind,
   location: row.location,
   manager: row.manager,
   isActive: row.is_active,
@@ -102,8 +109,9 @@ export const storesService = {
     const id = newId();
     await inTx(async (tx) => {
       await tx.query(
-        "INSERT INTO inv_stores (id, institution_id, code, name, location, manager) VALUES ($1, $2, $3, $4, $5, $6)",
-        [id, actor.institutionId, code, name, text(body?.location, "Location", 200), text(body?.manager, "Manager", 150)]
+        "INSERT INTO inv_stores (id, institution_id, code, name, location, manager, kind) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [id, actor.institutionId, code, name, text(body?.location, "Location", 200), text(body?.manager, "Manager", 150),
+          oneOf(body?.kind || undefined, "Store type", STORE_KINDS, "STORE")]
       );
       await audit(tx, actor, "inventory.store.create", "store", id, `Opened store ${code} (${name}).`);
     });
@@ -124,12 +132,13 @@ export const storesService = {
         if (moving) fail(409, "A transfer to or from this store is still open.");
       }
       await tx.query(
-        "UPDATE inv_stores SET code = $3, name = $4, location = $5, manager = $6, is_active = $7 WHERE institution_id = $1 AND id = $2",
+        "UPDATE inv_stores SET code = $3, name = $4, location = $5, manager = $6, is_active = $7, kind = $8 WHERE institution_id = $1 AND id = $2",
         [actor.institutionId, id, code,
           body?.name !== undefined ? text(body.name, "Store name", 120, true) : current.name,
           body?.location !== undefined ? text(body.location, "Location", 200) : current.location,
           body?.manager !== undefined ? text(body.manager, "Manager", 150) : current.manager,
-          isActive]
+          isActive,
+          body?.kind ? oneOf(body.kind, "Store type", STORE_KINDS) : current.kind]
       );
       await audit(tx, actor, "inventory.store.update", "store", id, `Edited store ${code}${isActive ? "" : " (closed)"}.`);
     });
@@ -239,6 +248,9 @@ type Movement = {
   transferId?: string | null;
   reversesId?: string | null;
   purchaseOrderId?: string | null;
+  requisitionId?: string | null;
+  expenseCategory?: string;
+  meal?: string;
   batch?: any; // a locked inv_batches row
 };
 
@@ -266,10 +278,11 @@ const post = async (tx: PoolClient, actor: Actor, m: Movement) => {
   const id = newId();
   await tx.query(
     `INSERT INTO inv_movements (id, institution_id, doc_no, item_id, store_id, kind, quantity, unit_cost, balance_after, party, reference, note,
-       transfer_id, reverses_id, created_by, batch_id, purchase_order_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+       transfer_id, reverses_id, created_by, batch_id, purchase_order_id, requisition_id, expense_category, meal)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
     [id, actor.institutionId, m.docNo, m.item.id, m.store.id, m.kind, m.quantity, r4(m.unitCost ?? Number(m.item.avg_cost)), after,
-      m.party || "", m.reference || "", m.note || "", m.transferId || null, m.reversesId || null, actor.email, m.batch?.id || null, m.purchaseOrderId || null]
+      m.party || "", m.reference || "", m.note || "", m.transferId || null, m.reversesId || null, actor.email, m.batch?.id || null, m.purchaseOrderId || null,
+      m.requisitionId || null, m.expenseCategory || "", m.meal || ""]
   );
   return { id, after };
 };
@@ -385,6 +398,9 @@ export const movementFromRow = (row: any) => ({
   batchNo: row.batch_no || "",
   expiresOn: row.expires_on || null,
   purchaseOrderId: row.purchase_order_id,
+  requisitionId: row.requisition_id,
+  expenseCategory: row.expense_category || "",
+  meal: row.meal || "",
   isReversed: row.is_reversed === true,
   createdBy: row.created_by,
   createdAt: toIso(row.created_at),
@@ -506,7 +522,10 @@ export const itemsService = {
   async remove(actor: Actor, id: string) {
     return inTx(async (tx) => {
       const item = await lockItem(tx, actor.institutionId, id);
-      const used = (await tx.query("SELECT EXISTS (SELECT 1 FROM inv_movements WHERE item_id = $1) OR EXISTS (SELECT 1 FROM inv_transfer_lines WHERE item_id = $1) OR EXISTS (SELECT 1 FROM inv_po_lines WHERE item_id = $1) AS used", [id])).rows[0].used;
+      const used = (await tx.query(
+        `SELECT EXISTS (SELECT 1 FROM inv_movements WHERE item_id = $1) OR EXISTS (SELECT 1 FROM inv_transfer_lines WHERE item_id = $1)
+           OR EXISTS (SELECT 1 FROM inv_po_lines WHERE item_id = $1) OR EXISTS (SELECT 1 FROM inv_requisition_lines WHERE item_id = $1)
+           OR EXISTS (SELECT 1 FROM inv_assets WHERE item_id = $1) AS used`, [id])).rows[0].used;
       if (used) fail(409, "This item has stock or purchase history. Archive it instead of deleting it.");
       await tx.query("DELETE FROM inv_batches WHERE item_id = $1", [id]);
       await tx.query("DELETE FROM inv_balances WHERE item_id = $1", [id]);
@@ -620,12 +639,13 @@ export const stockService = {
     const issuedTo = text(body?.issuedTo, "Issued to", 200, true);
     const reference = text(body?.reference, "Requisition number", 100);
     const note = text(body?.note, "Note", 500);
+    const expenseCategory = expenseCategoryOf(body?.expenseCategory);
     const no = docNo("ISS");
     await inTx(async (tx) => {
       const store = await activeStore(tx, actor.institutionId, body?.storeId);
       for (const line of lines) {
         const item = await activeItem(tx, actor.institutionId, line.itemId);
-        await takeOut(tx, actor, item, store, line.quantity, { kind: "ISSUE", docNo: no, party: issuedTo, reference, note }, { usableOnly: true });
+        await takeOut(tx, actor, item, store, line.quantity, { kind: "ISSUE", docNo: no, party: issuedTo, reference, note, expenseCategory }, { usableOnly: true });
       }
       await audit(tx, actor, "inventory.stock.issue", "stock", no, `Issued ${lines.length} item(s) from ${store.name} to ${issuedTo}.`);
     });
@@ -675,16 +695,16 @@ export const stockService = {
     return listDocument(actor.institutionId, no);
   },
 
-  // Damaged or lost stock leaves the books with a reason.
+  // Damaged, lost or wasted stock leaves the books with a reason.
   async writeOff(actor: Actor, body: any) {
-    const kind = oneOf(body?.kind, "Write-off type", ["DAMAGE", "LOSS"] as const);
+    const kind = oneOf(body?.kind, "Write-off type", ["DAMAGE", "LOSS", "WASTAGE"] as const);
     const qty = quantity(body?.quantity, "Quantity");
     const reason = text(body?.reason, "Reason", 500, true);
     const no = docNo(PREFIX[kind]);
     await inTx(async (tx) => {
       const store = await activeStore(tx, actor.institutionId, body?.storeId);
       const item = await activeItem(tx, actor.institutionId, body?.itemId);
-      await takeOut(tx, actor, item, store, qty, { kind, docNo: no, note: reason }, { batchId: typeof body?.batchId === "string" && body.batchId ? body.batchId : null });
+      await takeOut(tx, actor, item, store, qty, { kind, docNo: no, note: reason, expenseCategory: expenseCategoryOf(body?.expenseCategory) }, { batchId: typeof body?.batchId === "string" && body.batchId ? body.batchId : null });
       await audit(tx, actor, `inventory.stock.${kind.toLowerCase()}`, "stock", no, `Wrote off ${qty} ${item.unit} of ${item.sku} in ${store.name} as ${kind.toLowerCase()}. ${reason}`);
     });
     return listDocument(actor.institutionId, no);
@@ -699,6 +719,9 @@ export const stockService = {
       if (!original) fail(404, "Ledger entry not found.");
       if (["TRANSFER_OUT", "TRANSFER_IN"].includes(original.kind)) fail(409, "Transfer entries are undone by moving the stock back with a new transfer.");
       if (original.kind === "REVERSAL") fail(409, "A reversal cannot itself be reversed. Record the entry again instead.");
+      // Stock issued against a requisition goes back onto it as not yet issued. The requisition is
+      // locked before the item, the same order issuing from a requisition uses.
+      if (original.requisition_id && Number(original.quantity) < 0) await unissueRequisition(tx, original.requisition_id, original.item_id, -Number(original.quantity));
       const item = await lockItem(tx, actor.institutionId, original.item_id);
       const store = (await tx.query("SELECT * FROM inv_stores WHERE id = $1", [original.store_id])).rows[0];
       const qty = Number(original.quantity);
@@ -715,7 +738,8 @@ export const stockService = {
       // Goods received against a purchase order go back onto that order as not yet received.
       if (original.purchase_order_id && qty > 0) await unreceivePurchase(tx, original.purchase_order_id, item.id, qty);
       await post(tx, actor, { item, store, kind: "REVERSAL", quantity: -qty, unitCost: cost, docNo: no, party: original.party,
-        reference: original.doc_no, note: reason, reversesId: original.id, batch: item.track_batches ? batch : null, purchaseOrderId: original.purchase_order_id });
+        reference: original.doc_no, note: reason, reversesId: original.id, batch: item.track_batches ? batch : null, purchaseOrderId: original.purchase_order_id,
+        requisitionId: original.requisition_id, expenseCategory: original.expense_category, meal: original.meal });
       await audit(tx, actor, "inventory.stock.reverse", "stock", no, `Reversed ${original.doc_no} (${original.kind}) for ${item.sku}. ${reason}`);
     });
     return listDocument(actor.institutionId, no);
@@ -858,9 +882,23 @@ export const transfersService = {
 
 // ---- Assets -----------------------------------------------------------------------
 
-const ASSET_SELECT = `SELECT a.*, s.name AS store_name, s.code AS store_code FROM inv_assets a LEFT JOIN inv_stores s ON s.id = a.store_id`;
+export const ASSET_SELECT = `SELECT a.*, s.name AS store_name, s.code AS store_code,
+  r.room_number, r.hostel_name, r.building
+  FROM inv_assets a LEFT JOIN inv_stores s ON s.id = a.store_id LEFT JOIN hostel_rooms r ON r.id = a.room_id`;
 
-const assetFromRow = (row: any) => ({
+// "Room 101 · North Hall, Block A": how a hostel room is named on assets and reports.
+export const roomLabel = (row: { room_number?: string; hostel_name?: string; building?: string }) =>
+  row.room_number ? `Room ${row.room_number} · ${[row.hostel_name, row.building].filter(Boolean).join(", ")}` : "";
+
+// A hostel room of this institution.
+export const roomOf = async (db: Db, institutionId: string, id: unknown) => {
+  if (typeof id !== "string" || !id) fail(400, "Room is required.");
+  const room = (await db.query("SELECT * FROM hostel_rooms WHERE institution_id = $1 AND id = $2", [institutionId, id])).rows[0];
+  if (!room) fail(404, "Room not found.");
+  return room;
+};
+
+export const assetFromRow = (row: any) => ({
   id: row.id,
   assetTag: row.asset_tag,
   name: row.name,
@@ -871,6 +909,9 @@ const assetFromRow = (row: any) => ({
   storeId: row.store_id,
   storeName: row.store_name,
   storeCode: row.store_code,
+  roomId: row.room_id || null,
+  roomLabel: roomLabel(row),
+  itemId: row.item_id || null,
   location: row.location,
   supplier: row.supplier,
   purchaseCost: r2(Number(row.purchase_cost)),
@@ -893,6 +934,15 @@ const assetInput = async (db: Db, institutionId: string, body: any, existing?: a
     body?.[key] !== undefined || !existing ? text(body?.[key], label, max, required) : existing[column];
   let storeId = existing ? existing.store_id : null;
   if (body?.storeId !== undefined) storeId = body.storeId ? (await activeStore(db, institutionId, body.storeId)).id : null;
+  let roomId = existing ? existing.room_id : null;
+  let location = body?.location !== undefined || !existing ? text(body?.location, "Location", 200) : existing.location;
+  if (body?.roomId !== undefined) {
+    const room = body.roomId ? await roomOf(db, institutionId, body.roomId) : null;
+    roomId = room?.id || null;
+    // A room is a location; the location text follows it unless a new one was typed.
+    const typed = text(body?.location, "Location", 200);
+    if (room && (!typed || typed === existing?.location)) location = roomLabel(room);
+  }
   const data = {
     name: pick("name", "name", "Asset name", 200, true),
     category: pick("category", "category", "Category", 100),
@@ -900,7 +950,8 @@ const assetInput = async (db: Db, institutionId: string, body: any, existing?: a
     model: pick("model", "model", "Model", 100),
     serialNo: pick("serialNo", "serial_no", "Serial number", 100),
     storeId,
-    location: pick("location", "location", "Location", 200),
+    roomId,
+    location,
     supplier: pick("supplier", "supplier", "Supplier", 200),
     purchaseCost: body?.purchaseCost !== undefined && body?.purchaseCost !== null && body?.purchaseCost !== "" ? amount(body.purchaseCost, "Purchase cost") : existing ? Number(existing.purchase_cost) : 0,
     purchasedOn: body?.purchasedOn !== undefined ? date(body.purchasedOn, "Purchase date") : existing ? existing.purchased_on : null,
@@ -913,7 +964,7 @@ const assetInput = async (db: Db, institutionId: string, body: any, existing?: a
   return data;
 };
 
-const assetEvent = (tx: PoolClient, actor: Actor, assetId: string, action: string, detail: string) =>
+export const assetEvent = (tx: PoolClient, actor: Actor, assetId: string, action: string, detail: string) =>
   tx.query("INSERT INTO inv_asset_events (id, institution_id, asset_id, action, detail, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
     [newId(), actor.institutionId, assetId, action, detail.slice(0, 500), actor.email]);
 
@@ -930,16 +981,16 @@ const ASSET_ACTIONS: Record<string, { from: string[]; to: string }> = {
 };
 
 export const assetsService = {
-  async list(institutionId: string, filters: { search?: string; status?: string; category?: string; storeId?: string } = {}) {
+  async list(institutionId: string, filters: { search?: string; status?: string; category?: string; storeId?: string; roomId?: string } = {}) {
     const status = filters.status || "";
     const { rows } = await postgresService.query(
       `${ASSET_SELECT} WHERE a.institution_id = $1
          AND ($2 = '' OR ($2 = 'IN_SERVICE' AND a.status NOT IN ('DISPOSED', 'LOST')) OR a.status = $2)
-         AND ($3 = '' OR a.category = $3) AND ($4 = '' OR a.store_id = $4)
+         AND ($3 = '' OR a.category = $3) AND ($4 = '' OR a.store_id = $4) AND ($6 = '' OR a.room_id = $6)
          AND ($5 = '' OR a.name ILIKE '%' || $5 || '%' OR a.asset_tag ILIKE '%' || $5 || '%' OR a.serial_no ILIKE '%' || $5 || '%'
               OR a.assigned_to ILIKE '%' || $5 || '%' OR a.department ILIKE '%' || $5 || '%' OR a.location ILIKE '%' || $5 || '%' OR a.brand ILIKE '%' || $5 || '%')
        ORDER BY a.asset_tag LIMIT 5000`,
-      [institutionId, status, filters.category || "", filters.storeId || "", filters.search?.trim() || ""]
+      [institutionId, status, filters.category || "", filters.storeId || "", filters.search?.trim() || "", filters.roomId || ""]
     );
     return rows.map(assetFromRow);
   },
@@ -969,10 +1020,10 @@ export const assetsService = {
         const tag = count === 1 ? base : `${base}-${String(index).padStart(3, "0")}`;
         await tx.query(
           `INSERT INTO inv_assets (id, institution_id, asset_tag, name, category, brand, model, serial_no, store_id, location, supplier,
-             purchase_cost, purchased_on, warranty_until, condition, notes)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+             purchase_cost, purchased_on, warranty_until, condition, notes, room_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
           [id, actor.institutionId, tag, data.name, data.category, data.brand, data.model, data.serialNo, data.storeId, data.location,
-            data.supplier, data.purchaseCost, data.purchasedOn, data.warrantyUntil, data.condition, data.notes]
+            data.supplier, data.purchaseCost, data.purchasedOn, data.warrantyUntil, data.condition, data.notes, data.roomId]
         );
         await assetEvent(tx, actor, id, "REGISTERED", `Registered${data.location ? ` at ${data.location}` : ""}.`);
         created.push(id);
@@ -993,10 +1044,10 @@ export const assetsService = {
       const data = await assetInput(tx, actor.institutionId, body, current);
       await tx.query(
         `UPDATE inv_assets SET asset_tag = $3, name = $4, category = $5, brand = $6, model = $7, serial_no = $8, store_id = $9, location = $10,
-           supplier = $11, purchase_cost = $12, purchased_on = $13, warranty_until = $14, condition = $15, notes = $16, updated_at = NOW()
+           supplier = $11, purchase_cost = $12, purchased_on = $13, warranty_until = $14, condition = $15, notes = $16, room_id = $17, updated_at = NOW()
          WHERE institution_id = $1 AND id = $2`,
         [actor.institutionId, id, tag, data.name, data.category, data.brand, data.model, data.serialNo, data.storeId, data.location,
-          data.supplier, data.purchaseCost, data.purchasedOn, data.warrantyUntil, data.condition, data.notes]
+          data.supplier, data.purchaseCost, data.purchasedOn, data.warrantyUntil, data.condition, data.notes, data.roomId]
       );
       await assetEvent(tx, actor, id, "EDITED", "Details edited.");
       await audit(tx, actor, "inventory.asset.update", "asset", id, `Edited asset ${tag}.`);
@@ -1014,22 +1065,29 @@ export const assetsService = {
       const note = text(body?.note, "Note", 500, ["LOST", "DISPOSE"].includes(action));
       const condition = body?.condition ? oneOf(body.condition, "Condition", CONDITIONS) : asset.condition;
       let detail = note;
+      // An asset can be given to a hostel room instead of a person: the room then holds it.
+      const room = body?.roomId ? await roomOf(tx, actor.institutionId, body.roomId) : null;
       if (action === "ASSIGN") {
-        const assignedTo = text(body?.assignedTo, "Assigned to", 150, true);
+        const assignedTo = room && !body?.assignedTo ? roomLabel(room) : text(body?.assignedTo, "Assigned to", 150, true);
         const department = text(body?.department, "Department", 100);
-        const location = body?.location ? text(body.location, "Location", 200) : asset.location;
-        await tx.query("UPDATE inv_assets SET status = 'ASSIGNED', assigned_to = $2, department = $3, location = $4, assigned_on = $5, updated_at = NOW() WHERE id = $1",
-          [id, assignedTo, department, location, todayBd()]);
-        detail = `Assigned to ${assignedTo}${department ? ` (${department})` : ""}${location ? ` at ${location}` : ""}. ${note}`;
+        const location = room ? roomLabel(room) : body?.location ? text(body.location, "Location", 200) : asset.location;
+        await tx.query("UPDATE inv_assets SET status = 'ASSIGNED', assigned_to = $2, department = $3, location = $4, assigned_on = $5, room_id = $6, updated_at = NOW() WHERE id = $1",
+          [id, assignedTo, department, location, todayBd(), room ? room.id : asset.room_id]);
+        detail = `Assigned to ${assignedTo}${department ? ` (${department})` : ""}${location && location !== assignedTo ? ` at ${location}` : ""}. ${note}`;
       } else if (action === "MOVE") {
-        const location = text(body?.location, "New location", 200, true);
+        const location = room ? roomLabel(room) : text(body?.location, "New location", 200, true);
         const storeId = body?.storeId ? (await activeStore(tx, actor.institutionId, body.storeId)).id : asset.store_id;
-        await tx.query("UPDATE inv_assets SET location = $2, store_id = $3, updated_at = NOW() WHERE id = $1", [id, location, storeId]);
+        // Leaving a room for a plain location takes the asset out of the room.
+        const roomId = room ? room.id : null;
+        const fromRoom = asset.room_id ? roomLabel((await tx.query("SELECT * FROM hostel_rooms WHERE id = $1", [asset.room_id])).rows[0] || {}) : "";
+        // An asset held by its room is now held by the new room.
+        const holder = fromRoom && asset.assigned_to === fromRoom ? (room ? roomLabel(room) : location) : asset.assigned_to;
+        await tx.query("UPDATE inv_assets SET location = $2, store_id = $3, room_id = $4, assigned_to = $5, updated_at = NOW() WHERE id = $1", [id, location, storeId, roomId, holder]);
         detail = `Moved from ${asset.location || "—"} to ${location}. ${note}`;
       } else {
         const clearHolder = rule.to !== "ASSIGNED" && action !== "REPAIR";
         await tx.query(
-          `UPDATE inv_assets SET status = $2, condition = $3, updated_at = NOW()${clearHolder ? ", assigned_to = '', department = '', assigned_on = NULL" : ""}${body?.location ? ", location = $4" : ""} WHERE id = $1`,
+          `UPDATE inv_assets SET status = $2, condition = $3, updated_at = NOW()${clearHolder ? ", assigned_to = '', department = '', assigned_on = NULL, room_id = NULL" : ""}${body?.location ? ", location = $4" : ""} WHERE id = $1`,
           body?.location ? [id, rule.to, condition, text(body.location, "Location", 200)] : [id, rule.to, condition]
         );
         if (action === "RETURN") detail = `Returned by ${asset.assigned_to}. ${note}`;
@@ -1057,12 +1115,27 @@ export const assetsService = {
 
 // ---- Batches, expiry and settings ----------------------------------------------------
 
-const SETTINGS_DEFAULTS = { emailAlerts: false, alertEmails: "", expiryWarningDays: 30, lastAlertOn: null as string | null };
+// The parts of inventory an organisation can switch on. Items, stores and the stock ledger are always on.
+export const FEATURES = ["PURCHASING", "BATCHES", "TRANSFERS", "ASSETS", "REQUISITIONS", "KITCHEN", "ROOMS"] as const;
+export const PROFILES: Record<string, string[]> = {
+  SCHOOL: ["PURCHASING", "BATCHES", "TRANSFERS", "ASSETS", "REQUISITIONS"],
+  HOSTEL: ["PURCHASING", "BATCHES", "ASSETS", "REQUISITIONS", "KITCHEN", "ROOMS"],
+  OFFICE: ["PURCHASING", "TRANSFERS", "ASSETS", "REQUISITIONS"],
+  CUSTOM: [],
+};
+
+const SETTINGS_DEFAULTS = {
+  emailAlerts: false, alertEmails: "", expiryWarningDays: 30, lastAlertOn: null as string | null,
+  profile: "SCHOOL", features: PROFILES.SCHOOL, isSetUp: false,
+};
 
 export const settingsOf = async (institutionId: string) => {
   const row = (await postgresService.query("SELECT * FROM inv_settings WHERE institution_id = $1", [institutionId])).rows[0];
   if (!row) return { ...SETTINGS_DEFAULTS };
-  return { emailAlerts: row.email_alerts, alertEmails: row.alert_emails, expiryWarningDays: Number(row.expiry_warning_days), lastAlertOn: row.last_alert_on };
+  return {
+    emailAlerts: row.email_alerts, alertEmails: row.alert_emails, expiryWarningDays: Number(row.expiry_warning_days), lastAlertOn: row.last_alert_on,
+    profile: row.profile, features: (row.features || []).filter((key: string) => (FEATURES as readonly string[]).includes(key)), isSetUp: true,
+  };
 };
 
 const batchFromRow = (row: any, today: string, warnDays: number) => {
@@ -1115,11 +1188,26 @@ const unreceivePurchase = async (tx: PoolClient, purchaseOrderId: string, itemId
   await tx.query("UPDATE inv_purchase_orders SET status = $2, updated_at = NOW() WHERE id = $1", [purchaseOrderId, status]);
 };
 
+// A reversed issue puts its quantity back on the requisition as still to issue. Once the
+// requester has confirmed receipt the requisition is finished, so the goods come back with Take Back.
+const unissueRequisition = async (tx: PoolClient, requisitionId: string, itemId: string, qty: number) => {
+  const req = (await tx.query("SELECT * FROM inv_requisitions WHERE id = $1 FOR UPDATE", [requisitionId])).rows[0];
+  if (!req) return;
+  if (["RECEIVED", "CLOSED"].includes(req.status)) fail(409, `${req.req_no} is already ${req.status === "RECEIVED" ? "received" : "closed"}. Use Take Back to bring the stock back instead.`);
+  await tx.query("UPDATE inv_requisition_lines SET issued = GREATEST(issued - $3, 0) WHERE requisition_id = $1 AND item_id = $2", [requisitionId, itemId, qty]);
+  const totals = (await tx.query("SELECT SUM(issued) AS issued, SUM(approved) AS approved FROM inv_requisition_lines WHERE requisition_id = $1", [requisitionId])).rows[0];
+  const status = Number(totals.issued) <= 0 ? "APPROVED" : Number(totals.issued) >= Number(totals.approved) ? "ISSUED" : "PARTIAL";
+  await tx.query("UPDATE inv_requisitions SET status = $2, updated_at = NOW() WHERE id = $1", [requisitionId, status]);
+};
+
 // ---- Dashboard and alerts -----------------------------------------------------------
 
 // A write-off or count change worth this much, or this share of what was in the store, is flagged.
 const UNUSUAL_VALUE = 10_000;
 const UNUSUAL_SHARE = 0.25;
+// Wastage of a tenth or more of what a store used, and use at twice the usual weekly rate, are flagged.
+const HIGH_WASTAGE_SHARE = 0.1;
+const HIGH_USE_FACTOR = 2;
 
 export const insightsService = {
   async summary(institutionId: string) {
@@ -1138,8 +1226,14 @@ export const insightsService = {
          (SELECT COUNT(*) FROM inv_transfers WHERE institution_id = $1 AND status = 'IN_TRANSIT') AS in_transit,
          (SELECT COALESCE(SUM(quantity), 0) FROM inv_movements WHERE institution_id = $1 AND quantity > 0 AND kind IN ('OPENING', 'RECEIPT', 'RETURN')
             AND (created_at AT TIME ZONE 'Asia/Dhaka')::date = $2::date) AS today_in,
-         (SELECT COALESCE(-SUM(quantity), 0) FROM inv_movements WHERE institution_id = $1 AND kind = 'ISSUE'
-            AND (created_at AT TIME ZONE 'Asia/Dhaka')::date = $2::date) AS today_out
+         (SELECT COALESCE(-SUM(quantity), 0) FROM inv_movements WHERE institution_id = $1 AND kind IN ('ISSUE', 'CONSUMPTION')
+            AND (created_at AT TIME ZONE 'Asia/Dhaka')::date = $2::date) AS today_out,
+         (SELECT COUNT(*) FROM inv_requisitions WHERE institution_id = $1 AND status = 'SUBMITTED') AS requisitions_waiting,
+         (SELECT COUNT(*) FROM inv_requisitions WHERE institution_id = $1 AND status IN ('APPROVED', 'PARTIAL')) AS requisitions_to_issue,
+         (SELECT COALESCE(-SUM(quantity * unit_cost), 0) FROM inv_movements WHERE institution_id = $1 AND kind = 'CONSUMPTION'
+            AND created_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Dhaka') AT TIME ZONE 'Asia/Dhaka') AS month_consumed,
+         (SELECT COALESCE(-SUM(quantity * unit_cost), 0) FROM inv_movements WHERE institution_id = $1 AND kind IN ('WASTAGE', 'DAMAGE', 'LOSS')
+            AND created_at >= date_trunc('month', NOW() AT TIME ZONE 'Asia/Dhaka') AT TIME ZONE 'Asia/Dhaka') AS month_wasted
        FROM stock`, [institutionId, today])).rows[0];
 
     const assets = (await postgresService.query(
@@ -1149,7 +1243,7 @@ export const insightsService = {
     const monthly = (await postgresService.query(
       `SELECT to_char(date_trunc('month', created_at AT TIME ZONE 'Asia/Dhaka'), 'YYYY-MM') AS month,
          COALESCE(SUM(quantity * unit_cost) FILTER (WHERE kind IN ('OPENING', 'RECEIPT')), 0) AS in_value,
-         COALESCE(-SUM(quantity * unit_cost) FILTER (WHERE kind = 'ISSUE'), 0) AS out_value
+         COALESCE(-SUM(quantity * unit_cost) FILTER (WHERE kind IN ('ISSUE', 'CONSUMPTION')), 0) AS out_value
        FROM inv_movements WHERE institution_id = $1
          AND created_at >= (date_trunc('month', NOW() AT TIME ZONE 'Asia/Dhaka') - INTERVAL '5 months') AT TIME ZONE 'Asia/Dhaka'
        GROUP BY 1 ORDER BY 1`, [institutionId])).rows;
@@ -1165,7 +1259,7 @@ export const insightsService = {
     const topIssued = (await postgresService.query(
       `SELECT i.id, i.name, i.sku, i.unit, -SUM(m.quantity) AS qty, -SUM(m.quantity * m.unit_cost) AS value
        FROM inv_movements m JOIN inv_items i ON i.id = m.item_id
-       WHERE m.institution_id = $1 AND m.kind = 'ISSUE' AND m.created_at >= NOW() - INTERVAL '90 days'
+       WHERE m.institution_id = $1 AND m.kind IN ('ISSUE', 'CONSUMPTION') AND m.created_at >= NOW() - INTERVAL '90 days'
        GROUP BY i.id ORDER BY qty DESC LIMIT 5`, [institutionId])).rows;
 
     const recent = (await postgresService.query(`${MOVEMENT_SELECT} WHERE m.institution_id = $1 ORDER BY m.created_at DESC LIMIT 10`, [institutionId])).rows;
@@ -1190,6 +1284,11 @@ export const insightsService = {
       inTransit: Number(totals.in_transit),
       todayIn: r3(Number(totals.today_in)),
       todayOut: r3(Number(totals.today_out)),
+      requisitionsWaiting: Number(totals.requisitions_waiting),
+      requisitionsToIssue: Number(totals.requisitions_to_issue),
+      monthConsumed: r2(Number(totals.month_consumed)),
+      monthWasted: r2(Number(totals.month_wasted)),
+      roomAssets: Number((await postgresService.query("SELECT COUNT(*) AS n FROM inv_assets WHERE institution_id = $1 AND room_id IS NOT NULL AND status NOT IN ('DISPOSED', 'LOST')", [institutionId])).rows[0].n),
       assets: {
         total: assets.filter((row: any) => row.status !== "DISPOSED").reduce((sum: number, row: any) => sum + Number(row.n), 0),
         value: r2(assets.filter((row: any) => row.status !== "DISPOSED").reduce((sum: number, row: any) => sum + Number(row.cost), 0)),
@@ -1260,6 +1359,53 @@ export const insightsService = {
     const repair = Number((await postgresService.query("SELECT COUNT(*) AS n FROM inv_assets WHERE institution_id = $1 AND status = 'UNDER_REPAIR'", [institutionId])).rows[0].n);
     if (repair > 0) alerts.push({ level: "info", type: "UNDER_REPAIR", title: `${repair} asset${repair === 1 ? " is" : "s are"} under repair`, detail: "Mark them repaired when they are back.", link: "/admin/inventory/assets" });
 
+    const requisitions = (await postgresService.query(
+      `SELECT COUNT(*) FILTER (WHERE status = 'SUBMITTED') AS waiting, COUNT(*) FILTER (WHERE status IN ('APPROVED', 'PARTIAL')) AS to_issue,
+         MIN(created_at) FILTER (WHERE status = 'SUBMITTED') AS oldest
+       FROM inv_requisitions WHERE institution_id = $1`, [institutionId])).rows[0];
+    if (Number(requisitions.waiting) > 0) {
+      alerts.push({ level: "warning", type: "PENDING_REQUISITION", title: `${requisitions.waiting} requisition${Number(requisitions.waiting) === 1 ? " waits" : "s wait"} for approval`,
+        detail: `Oldest since ${toIso(requisitions.oldest)?.slice(0, 10)}.`, link: "/admin/inventory/requisitions" });
+    }
+    if (Number(requisitions.to_issue) > 0) {
+      alerts.push({ level: "info", type: "REQUISITION_TO_ISSUE", title: `${requisitions.to_issue} approved requisition${Number(requisitions.to_issue) === 1 ? " is" : "s are"} waiting to be issued`,
+        detail: "Issue the stock from the store.", link: "/admin/inventory/requisitions" });
+    }
+
+    // Wastage that is a large share of what a store used in the last 7 days.
+    const wastage = (await postgresService.query(
+      `SELECT s.name, -SUM(m.quantity * m.unit_cost) FILTER (WHERE m.kind = 'WASTAGE') AS wasted,
+         -SUM(m.quantity * m.unit_cost) FILTER (WHERE m.kind IN ('CONSUMPTION', 'ISSUE')) AS used
+       FROM inv_movements m JOIN inv_stores s ON s.id = m.store_id
+       WHERE m.institution_id = $1 AND m.kind IN ('WASTAGE', 'CONSUMPTION', 'ISSUE') AND m.created_at >= NOW() - INTERVAL '7 days'
+       GROUP BY s.id HAVING COALESCE(-SUM(m.quantity * m.unit_cost) FILTER (WHERE m.kind = 'WASTAGE'), 0) > 0`, [institutionId])).rows;
+    for (const row of wastage) {
+      const wasted = r2(Number(row.wasted || 0));
+      const used = r2(Number(row.used || 0));
+      const share = used + wasted > 0 ? wasted / (used + wasted) : 1;
+      if (share >= HIGH_WASTAGE_SHARE) {
+        alerts.push({ level: "warning", type: "HIGH_WASTAGE", title: `High wastage in ${row.name}`,
+          detail: `৳${wasted} wasted against ৳${used} used in the last 7 days (${Math.round(share * 100)}%).`, link: "/admin/inventory/kitchen" });
+      }
+    }
+
+    // An item used much faster this week than its usual weekly rate over the 8 weeks before.
+    const spikes = (await postgresService.query(
+      `SELECT i.name, i.unit,
+         COALESCE(-SUM(m.quantity) FILTER (WHERE m.created_at >= NOW() - INTERVAL '7 days'), 0) AS week,
+         COALESCE(-SUM(m.quantity) FILTER (WHERE m.created_at < NOW() - INTERVAL '7 days'), 0) / 8.0 AS usual
+       FROM inv_movements m JOIN inv_items i ON i.id = m.item_id
+       WHERE m.institution_id = $1 AND m.kind IN ('ISSUE', 'CONSUMPTION') AND m.created_at >= NOW() - INTERVAL '63 days'
+       GROUP BY i.id`, [institutionId])).rows;
+    for (const row of spikes) {
+      const week = r3(Number(row.week));
+      const usual = r3(Number(row.usual));
+      if (usual > 0 && week >= usual * HIGH_USE_FACTOR) {
+        alerts.push({ level: "info", type: "HIGH_CONSUMPTION", title: `${row.name} used ${Math.round(week / usual)}× faster than usual`,
+          detail: `${week} ${row.unit} this week; usually about ${usual} ${row.unit} a week.`, link: "/admin/inventory/reports" });
+      }
+    }
+
     const order = { danger: 0, warning: 1, info: 2 };
     return alerts.sort((a, b) => order[a.level] - order[b.level]);
   },
@@ -1267,8 +1413,8 @@ export const insightsService = {
   // Issued quantity per item over a window, for fast, slow and dead moving stock.
   async movement(institutionId: string, days: number) {
     const { rows } = await postgresService.query(
-      `SELECT i.id, COALESCE(-SUM(m.quantity) FILTER (WHERE m.kind = 'ISSUE' AND m.created_at >= NOW() - make_interval(days => $2::int)), 0) AS issued,
-         MAX(m.created_at) FILTER (WHERE m.kind = 'ISSUE') AS last_issue
+      `SELECT i.id, COALESCE(-SUM(m.quantity) FILTER (WHERE m.kind IN ('ISSUE', 'CONSUMPTION') AND m.created_at >= NOW() - make_interval(days => $2::int)), 0) AS issued,
+         MAX(m.created_at) FILTER (WHERE m.kind IN ('ISSUE', 'CONSUMPTION')) AS last_issue
        FROM inv_items i LEFT JOIN inv_movements m ON m.item_id = i.id
        WHERE i.institution_id = $1 AND i.status = 'ACTIVE' GROUP BY i.id`, [institutionId, days]);
     return Object.fromEntries(rows.map((row: any) => [row.id, { issued: r3(Number(row.issued)), lastIssueAt: toIso(row.last_issue) }]));

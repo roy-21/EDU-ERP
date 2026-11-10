@@ -1827,7 +1827,7 @@ CREATE TABLE IF NOT EXISTS inv_movements (
     doc_no VARCHAR(30) NOT NULL,
     item_id VARCHAR(64) NOT NULL REFERENCES inv_items(id) DEFERRABLE INITIALLY DEFERRED,
     store_id VARCHAR(64) NOT NULL REFERENCES inv_stores(id) DEFERRABLE INITIALLY DEFERRED,
-    kind VARCHAR(12) NOT NULL CHECK (kind IN ('OPENING', 'RECEIPT', 'ISSUE', 'RETURN', 'ADJUSTMENT', 'DAMAGE', 'LOSS', 'TRANSFER_OUT', 'TRANSFER_IN', 'REVERSAL')),
+    kind VARCHAR(12) NOT NULL CONSTRAINT inv_movements_kind_check CHECK (kind IN ('OPENING', 'RECEIPT', 'ISSUE', 'RETURN', 'ADJUSTMENT', 'DAMAGE', 'LOSS', 'TRANSFER_OUT', 'TRANSFER_IN', 'REVERSAL', 'CONSUMPTION', 'WASTAGE')),
     quantity NUMERIC(14,3) NOT NULL CHECK (quantity <> 0),
     unit_cost NUMERIC(14,4) NOT NULL DEFAULT 0 CHECK (unit_cost >= 0),
     balance_after NUMERIC(14,3) NOT NULL CHECK (balance_after >= 0),
@@ -1964,4 +1964,86 @@ CREATE TABLE IF NOT EXISTS inv_settings (
     alert_emails VARCHAR(1000) NOT NULL DEFAULT '',
     expiry_warning_days INTEGER NOT NULL DEFAULT 30 CHECK (expiry_warning_days BETWEEN 1 AND 365),
     last_alert_on DATE
+);
+
+-- ----------------------------------------------------------------------
+-- One inventory for every kind of organisation: a setup that picks the parts in use,
+-- kinds of store, requisitions with approval, kitchen consumption and room assets.
+-- Switching a part off only hides it; its data stays.
+-- ----------------------------------------------------------------------
+ALTER TABLE inv_settings ADD COLUMN IF NOT EXISTS profile VARCHAR(12) NOT NULL DEFAULT 'SCHOOL';
+ALTER TABLE inv_settings ADD COLUMN IF NOT EXISTS features TEXT[] NOT NULL DEFAULT ARRAY['PURCHASING', 'BATCHES', 'TRANSFERS', 'ASSETS', 'REQUISITIONS'];
+
+ALTER TABLE inv_stores ADD COLUMN IF NOT EXISTS kind VARCHAR(12) NOT NULL DEFAULT 'STORE';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'inv_stores_kind_check') THEN
+    ALTER TABLE inv_stores ADD CONSTRAINT inv_stores_kind_check CHECK (kind IN ('STORE', 'WAREHOUSE', 'KITCHEN', 'DEPARTMENT', 'LAB', 'OFFICE', 'OTHER'));
+  END IF;
+END $$;
+
+-- Kitchen use and wastage are ledger kinds of their own, so they are never mixed up with issues.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'inv_movements_kind_check' AND pg_get_constraintdef(oid) LIKE '%WASTAGE%') THEN
+    ALTER TABLE inv_movements DROP CONSTRAINT IF EXISTS inv_movements_kind_check;
+    ALTER TABLE inv_movements ADD CONSTRAINT inv_movements_kind_check CHECK (kind IN ('OPENING', 'RECEIPT', 'ISSUE', 'RETURN', 'ADJUSTMENT',
+      'DAMAGE', 'LOSS', 'TRANSFER_OUT', 'TRANSFER_IN', 'REVERSAL', 'CONSUMPTION', 'WASTAGE'));
+  END IF;
+END $$;
+-- What the stock was used for (Kitchen, Office supplies, Maintenance...), for the expense report.
+ALTER TABLE inv_movements ADD COLUMN IF NOT EXISTS expense_category VARCHAR(60) NOT NULL DEFAULT '';
+-- Which meal kitchen stock was cooked for: Breakfast, Lunch, Dinner, Snacks.
+ALTER TABLE inv_movements ADD COLUMN IF NOT EXISTS meal VARCHAR(12) NOT NULL DEFAULT '';
+
+-- A department, room or person asks for stock; an approver decides how much; the store issues it;
+-- the requester confirms it arrived. SUBMITTED -> APPROVED -> PARTIAL -> ISSUED -> RECEIVED.
+CREATE TABLE IF NOT EXISTS inv_requisitions (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    req_no VARCHAR(30) NOT NULL,
+    destination VARCHAR(200) NOT NULL,
+    purpose VARCHAR(500) NOT NULL DEFAULT '',
+    expense_category VARCHAR(60) NOT NULL DEFAULT '',
+    needed_by DATE,
+    status VARCHAR(10) NOT NULL DEFAULT 'SUBMITTED' CHECK (status IN ('SUBMITTED', 'APPROVED', 'REJECTED', 'PARTIAL', 'ISSUED', 'RECEIVED', 'CLOSED', 'CANCELLED')),
+    store_id VARCHAR(64) REFERENCES inv_stores(id) DEFERRABLE INITIALLY DEFERRED,
+    requester_id VARCHAR(64) NOT NULL DEFAULT '',
+    requested_by VARCHAR(255) NOT NULL DEFAULT '',
+    decided_by VARCHAR(255) NOT NULL DEFAULT '',
+    decided_at TIMESTAMP WITH TIME ZONE,
+    decision_note VARCHAR(500) NOT NULL DEFAULT '',
+    received_by VARCHAR(255) NOT NULL DEFAULT '',
+    received_at TIMESTAMP WITH TIME ZONE,
+    receive_note VARCHAR(500) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS inv_requisitions_by_status ON inv_requisitions (institution_id, status);
+CREATE INDEX IF NOT EXISTS inv_requisitions_by_requester ON inv_requisitions (institution_id, requester_id);
+
+CREATE TABLE IF NOT EXISTS inv_requisition_lines (
+    requisition_id VARCHAR(64) NOT NULL REFERENCES inv_requisitions(id) ON DELETE CASCADE,
+    item_id VARCHAR(64) NOT NULL REFERENCES inv_items(id) DEFERRABLE INITIALLY DEFERRED,
+    requested NUMERIC(14,3) NOT NULL CHECK (requested > 0),
+    approved NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK (approved >= 0 AND approved <= requested),
+    issued NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK (issued >= 0 AND issued <= approved),
+    PRIMARY KEY (requisition_id, item_id)
+);
+ALTER TABLE inv_movements ADD COLUMN IF NOT EXISTS requisition_id VARCHAR(64) REFERENCES inv_requisitions(id) DEFERRABLE INITIALLY DEFERRED;
+
+-- Assets can sit in a hostel room, and remember the stock item they were taken from.
+ALTER TABLE inv_assets ADD COLUMN IF NOT EXISTS room_id VARCHAR(64) REFERENCES hostel_rooms(id) ON DELETE SET NULL;
+ALTER TABLE inv_assets ADD COLUMN IF NOT EXISTS item_id VARCHAR(64) REFERENCES inv_items(id) DEFERRABLE INITIALLY DEFERRED;
+CREATE INDEX IF NOT EXISTS inv_assets_by_room ON inv_assets (room_id) WHERE room_id IS NOT NULL;
+
+-- How many meals a kitchen served, when it is counted by hand. Without a count, the hostel
+-- meal bookings of that day are used, so cost per meal works either way.
+CREATE TABLE IF NOT EXISTS inv_meal_counts (
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    store_id VARCHAR(64) NOT NULL REFERENCES inv_stores(id) ON DELETE CASCADE,
+    day DATE NOT NULL,
+    meal VARCHAR(12) NOT NULL,
+    served INTEGER NOT NULL CHECK (served >= 0),
+    updated_by VARCHAR(255) NOT NULL DEFAULT '',
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (store_id, day, meal)
 );

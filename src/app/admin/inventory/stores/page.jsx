@@ -5,11 +5,12 @@ import { inventoryApi } from "@/lib/operationsApi";
 import { useMe } from "@/lib/useMe";
 import QuickForm from "@/components/erp/QuickForm";
 import { DataTable, ErrorBanner, NoAccess, SystemShell, dangerButton, friendlyError, linkButton, money, primaryButton, useData } from "@/components/erp/ui";
-import { CRUMBS, Notice } from "../_components/inventoryUi";
+import { CRUMBS, Notice, STORE_KINDS, STORE_KIND_LABELS } from "../_components/inventoryUi";
 
 const FIELDS = [
-  { name: "code", label: "Code *", hint: "Short, e.g. CS, CHEM-LAB" },
+  { name: "code", label: "Code *", hint: "Short, e.g. CS, CHEM-LAB, KITCHEN" },
   { name: "name", label: "Name *" },
+  { name: "kind", label: "Type", type: "select", noBlank: true, options: STORE_KINDS, hint: "A Kitchen gets the daily kitchen sheet and meal costs." },
   { name: "location", label: "Location / address", wide: true },
   { name: "manager", label: "Store manager" },
 ];
@@ -50,11 +51,12 @@ export default function StoresPage() {
       <ErrorBanner message={error || actionError} onDismiss={actionError ? () => setActionError("") : undefined} />
       <Notice text={notice} />
       <section className="rounded-xl border border-slate-200 bg-white p-1">
-        <DataTable columns={["Code", "Store", "Location", "Manager", "Items held", "Stock value", "Assets", "Status", "Actions"]} isLoading={isLoading} hasRows={stores.length > 0} emptyMessage="No stores yet. Add the central store first.">
+        <DataTable columns={["Code", "Store", "Type", "Location", "Manager", "Items held", "Stock value", "Assets", "Status", "Actions"]} isLoading={isLoading} hasRows={stores.length > 0} emptyMessage="No stores yet. Add the central store first.">
           {stores.map((store) => (
             <tr key={store.id} className="border-b border-slate-100">
               <td className="px-4 py-3 font-mono text-xs">{store.code}</td>
               <td className="px-4 py-3 font-medium text-slate-800">{store.name}</td>
+              <td className="px-4 py-3">{STORE_KIND_LABELS[store.kind] || store.kind}</td>
               <td className="px-4 py-3">{store.location || "—"}</td>
               <td className="px-4 py-3">{store.manager || "—"}</td>
               <td className="px-4 py-3 tabular-nums">{store.itemCount}</td>
@@ -80,7 +82,7 @@ export default function StoresPage() {
           ))}
         </DataTable>
       </section>
-      {editing && <QuickForm title={editing.store ? `Edit ${editing.store.name}` : "Add Store"} fields={FIELDS} initial={editing.store || {}} onSubmit={save} onClose={() => setEditing(null)} />}
+      {editing && <QuickForm title={editing.store ? `Edit ${editing.store.name}` : "Add Store"} fields={FIELDS} initial={editing.store || { kind: "STORE" }} onSubmit={save} onClose={() => setEditing(null)} />}
     </SystemShell>
   );
 }

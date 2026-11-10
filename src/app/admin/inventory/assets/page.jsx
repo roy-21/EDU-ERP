@@ -11,7 +11,9 @@ import { ASSET_LABELS, AssetBadge, Barcode, CRUMBS, Notice } from "../_component
 
 const CONDITIONS = [["NEW", "New"], ["GOOD", "Good"], ["FAIR", "Fair"], ["POOR", "Poor"]];
 
-const assetFields = (stores, isNew) => [
+const roomOptions = (rooms) => rooms.map((room) => [room.id, room.label]);
+
+const assetFields = (stores, rooms, isNew) => [
   { name: "name", label: "Asset name *", wide: true, hint: "e.g. Dell OptiPlex 7090, Digital Microscope, Student Desk" },
   { name: "category", label: "Category", hint: "Computer, Lab Equipment, Furniture, Projector..." },
   { name: "assetTag", label: isNew ? "Asset tag (empty = automatic)" : "Asset tag *" },
@@ -20,7 +22,8 @@ const assetFields = (stores, isNew) => [
   { name: "brand", label: "Brand" },
   { name: "model", label: "Model" },
   { name: "storeId", label: "Home store", type: "select", optional: true, options: stores.filter((s) => s.isActive).map((s) => [s.id, `${s.name} (${s.code})`]) },
-  { name: "location", label: "Room / location" },
+  ...(rooms.length > 0 ? [{ name: "roomId", label: "Hostel room", type: "select", optional: true, options: roomOptions(rooms) }] : []),
+  { name: "location", label: rooms.length > 0 ? "Or location" : "Room / location" },
   { name: "supplier", label: "Supplier" },
   { name: "purchaseCost", label: "Purchase cost (৳, each)", type: "number", step: "0.01", min: 0, optional: true },
   { name: "purchasedOn", label: "Purchase date", type: "date", optional: true },
@@ -29,19 +32,24 @@ const assetFields = (stores, isNew) => [
   { name: "notes", label: "Notes", type: "textarea", rows: 2 },
 ];
 
+// A hostel room to pick, when the institution has rooms.
+const roomField = (rooms) => (rooms.length > 0 ? [{ name: "roomId", label: "Hostel room", type: "select", optional: true, options: roomOptions(rooms) }] : []);
+
 // Which buttons each state offers, and what each needs.
-const ACTIONS = {
+const actionsFor = (rooms) => ({
   ASSIGN: { label: "Assign", from: ["AVAILABLE"], fields: [
-    { name: "assignedTo", label: "Assigned to (person or room) *" }, { name: "department", label: "Department" }, { name: "location", label: "Location" }, { name: "note", label: "Note" },
+    ...roomField(rooms),
+    { name: "assignedTo", label: rooms.length > 0 ? "Assigned to (person; empty = the room)" : "Assigned to (person or room) *" },
+    { name: "department", label: "Department" }, { name: "location", label: "Location" }, { name: "note", label: "Note" },
   ] },
   RETURN: { label: "Return", from: ["ASSIGNED"], fields: [{ name: "condition", label: "Condition on return", type: "select", options: CONDITIONS }, { name: "location", label: "Now at" }, { name: "note", label: "Note" }] },
-  MOVE: { label: "Move", from: ["AVAILABLE", "ASSIGNED"], fields: [{ name: "location", label: "New location *" }, { name: "note", label: "Note" }] },
+  MOVE: { label: "Move", from: ["AVAILABLE", "ASSIGNED"], fields: [...roomField(rooms), { name: "location", label: rooms.length > 0 ? "Or new location" : "New location *" }, { name: "note", label: "Note" }] },
   REPAIR: { label: "Send for repair", from: ["AVAILABLE", "ASSIGNED"], fields: [{ name: "note", label: "Problem / repair shop" }] },
   REPAIRED: { label: "Repaired", from: ["UNDER_REPAIR"], fields: [{ name: "condition", label: "Condition", type: "select", options: CONDITIONS }, { name: "note", label: "Note" }] },
   LOST: { label: "Mark lost", from: ["AVAILABLE", "ASSIGNED"], danger: true, fields: [{ name: "note", label: "What happened *" }] },
   FOUND: { label: "Found", from: ["LOST"], fields: [{ name: "location", label: "Found at" }, { name: "note", label: "Note" }] },
   DISPOSE: { label: "Dispose", from: ["AVAILABLE", "UNDER_REPAIR", "LOST"], danger: true, approve: true, fields: [{ name: "note", label: "Reason (sold, scrapped, donated) *" }] },
-};
+});
 
 const CSV_COLUMNS = [
   { label: "Asset tag", value: (a) => a.assetTag },
@@ -106,14 +114,15 @@ function AssetView({ id, onClose }) {
 export default function AssetsPage() {
   const { can, isReady } = useMe();
   const [filters, setFilters] = useState({ search: "", status: "IN_SERVICE", category: "", storeId: "" });
-  const load = useCallback(() => Promise.all([inventoryApi.assets(filters), inventoryApi.stores(), inventoryApi.categories()]), [filters]);
+  const load = useCallback(() => Promise.all([inventoryApi.assets(filters), inventoryApi.stores(), inventoryApi.categories(), inventoryApi.rooms()]), [filters]);
   const { data, error, isLoading, reload } = useData(load);
   const [editing, setEditing] = useState(null);
   const [acting, setActing] = useState(null);
   const [viewing, setViewing] = useState(null);
   const [notice, setNotice] = useState("");
   const [actionError, setActionError] = useState("");
-  const [assets, stores, categories] = data || [[], [], []];
+  const [assets, stores, categories, rooms] = data || [[], [], [], []];
+  const ACTIONS = actionsFor(rooms);
   const { pageItems, pagerProps } = usePagination(assets, 25);
 
   if (isReady && !can("inventory.read")) return <NoAccess />;
@@ -195,7 +204,7 @@ export default function AssetsPage() {
         <div className="px-4 pb-3"><Pager {...pagerProps} /></div>
       </section>
       {editing && (
-        <QuickForm title={editing.asset ? `Edit ${editing.asset.assetTag}` : "Register Asset"} fields={assetFields(stores, !editing.asset)}
+        <QuickForm title={editing.asset ? `Edit ${editing.asset.assetTag}` : "Register Asset"} fields={assetFields(stores, rooms, !editing.asset)}
           initial={editing.asset || { count: 1, condition: "GOOD" }} onSubmit={save} onClose={() => setEditing(null)} />
       )}
       {acting && (

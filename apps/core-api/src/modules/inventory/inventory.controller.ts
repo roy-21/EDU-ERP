@@ -5,6 +5,10 @@ import { actorOf } from "../identity/identity.controller";
 import { assetsService, batchesService, insightsService, itemsService, stockService, storesService, transfersService } from "./inventory.service";
 import { purchaseOrdersService, suppliersService } from "./inventory-purchase.service";
 import { alertSettingsService, sendAlertDigest } from "./inventory-alerts.service";
+import { requisitionsService } from "./inventory-requisitions.service";
+import { consumptionService } from "./inventory-kitchen.service";
+import { roomsService } from "./inventory-rooms.service";
+import { reportsService } from "./inventory-reports.service";
 
 export const inventoryRouter = Router();
 
@@ -123,7 +127,7 @@ inventoryRouter.post("/inventory/purchase-orders/:id/cancel", canApprove, route(
 
 // Assets
 inventoryRouter.get("/inventory/assets", canRead, route(async (req, res) => {
-  send(res, 200, await assetsService.list(tenant(req), { search: query(req, "search"), status: query(req, "status"), category: query(req, "category"), storeId: query(req, "storeId") }));
+  send(res, 200, await assetsService.list(tenant(req), { search: query(req, "search"), status: query(req, "status"), category: query(req, "category"), storeId: query(req, "storeId"), roomId: query(req, "roomId") }));
 }));
 inventoryRouter.get("/inventory/assets/:id", canRead, route(async (req, res) => send(res, 200, await assetsService.get(tenant(req), req.params.id))));
 inventoryRouter.post("/inventory/assets", canCreate, route(async (req, res) => send(res, 201, await assetsService.create(actorOf(req), req.body))));
@@ -137,3 +141,36 @@ inventoryRouter.post("/inventory/assets/:id/action", canHandleAssets, route(asyn
   send(res, 200, await assetsService.act(actorOf(req), req.params.id, req.body));
 }));
 inventoryRouter.delete("/inventory/assets/:id", canDelete, route(async (req, res) => send(res, 200, await assetsService.remove(actorOf(req), req.params.id))));
+// Stock taken out of a store and registered unit by unit as assets, in rooms or places.
+inventoryRouter.post("/inventory/assets/from-stock", canMoveStock, route(async (req, res) => send(res, 201, await roomsService.fromStock(actorOf(req), req.body))));
+inventoryRouter.get("/inventory/rooms", canRead, route(async (req, res) => send(res, 200, await roomsService.list(tenant(req)))));
+
+// Organisation setup: which parts of inventory are in use
+inventoryRouter.put("/inventory/setup", canEdit, route(async (req, res) => send(res, 200, await alertSettingsService.saveSetup(actorOf(req), req.body))));
+
+// Requisitions. Anyone allowed to raise one sees their own; the store and approvers see all.
+const canRequest = requirePermissionKey("inventory.request_items", "inventory.read");
+inventoryRouter.get("/inventory/requisitions", canRequest, route(async (req, res) => {
+  send(res, 200, await requisitionsService.list(actorOf(req), { status: query(req, "status"), mine: query(req, "mine") === "1", search: query(req, "search") }));
+}));
+inventoryRouter.get("/inventory/requisitions/catalog", canRequest, route(async (req, res) => send(res, 200, await requisitionsService.catalog(tenant(req)))));
+inventoryRouter.get("/inventory/requisitions/:id", canRequest, route(async (req, res) => send(res, 200, await requisitionsService.get(actorOf(req), req.params.id))));
+inventoryRouter.post("/inventory/requisitions", requirePermissionKey("inventory.request_items"), route(async (req, res) => send(res, 201, await requisitionsService.create(actorOf(req), req.body))));
+inventoryRouter.post("/inventory/requisitions/:id/approve", canApprove, route(async (req, res) => send(res, 200, await requisitionsService.approve(actorOf(req), req.params.id, req.body))));
+inventoryRouter.post("/inventory/requisitions/:id/reject", canApprove, route(async (req, res) => send(res, 200, await requisitionsService.reject(actorOf(req), req.params.id, req.body))));
+inventoryRouter.post("/inventory/requisitions/:id/close", canApprove, route(async (req, res) => send(res, 200, await requisitionsService.close(actorOf(req), req.params.id, req.body))));
+inventoryRouter.post("/inventory/requisitions/:id/issue", canMoveStock, route(async (req, res) => send(res, 201, await requisitionsService.issue(actorOf(req), req.params.id, req.body))));
+inventoryRouter.post("/inventory/requisitions/:id/cancel", canRequest, route(async (req, res) => send(res, 200, await requisitionsService.cancel(actorOf(req), req.params.id, req.body))));
+inventoryRouter.post("/inventory/requisitions/:id/receive", canRequest, route(async (req, res) => send(res, 200, await requisitionsService.confirm(actorOf(req), req.params.id, req.body))));
+
+// Consumption, wastage and the kitchen day sheet
+const canConsume = requirePermissionKey("inventory.manage_kitchen", "inventory.manage_stock");
+inventoryRouter.post("/inventory/consumption", canConsume, route(async (req, res) => send(res, 201, await consumptionService.consume(actorOf(req), req.body))));
+inventoryRouter.post("/inventory/wastage", canConsume, route(async (req, res) => send(res, 201, await consumptionService.waste(actorOf(req), req.body))));
+inventoryRouter.put("/inventory/kitchen/meal-count", canConsume, route(async (req, res) => send(res, 200, await consumptionService.setMealCount(actorOf(req), req.body))));
+inventoryRouter.get("/inventory/kitchen/day", canRead, route(async (req, res) => send(res, 200, await consumptionService.day(tenant(req), query(req, "storeId"), query(req, "date")))));
+inventoryRouter.get("/inventory/kitchen/month", canRead, route(async (req, res) => send(res, 200, await consumptionService.month(tenant(req), query(req, "storeId"), { month: query(req, "month"), from: query(req, "from"), to: query(req, "to") }))));
+
+// Spending by purpose and reorder suggestions
+inventoryRouter.get("/inventory/reports/expenses", canRead, route(async (req, res) => send(res, 200, await reportsService.expenses(tenant(req), { from: query(req, "from"), to: query(req, "to") }))));
+inventoryRouter.get("/inventory/reports/reorder", canRead, route(async (req, res) => send(res, 200, await reportsService.reorder(tenant(req), query(req, "days")))));

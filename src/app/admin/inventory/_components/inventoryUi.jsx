@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Field, FormModal, inputClass, linkButton } from "@/components/erp/ui";
 
@@ -16,7 +17,49 @@ export const KIND_LABELS = {
   TRANSFER_OUT: "Transfer out",
   TRANSFER_IN: "Transfer in",
   REVERSAL: "Reversal",
+  CONSUMPTION: "Consumed",
+  WASTAGE: "Wastage",
 };
+
+// Kinds of store; a KITCHEN store gets the kitchen day sheet.
+export const STORE_KINDS = [["STORE", "Store"], ["WAREHOUSE", "Warehouse"], ["KITCHEN", "Kitchen"], ["DEPARTMENT", "Department"], ["LAB", "Lab"], ["OFFICE", "Office"], ["OTHER", "Other"]];
+export const STORE_KIND_LABELS = Object.fromEntries(STORE_KINDS);
+
+export const MEALS = ["Breakfast", "Lunch", "Dinner", "Snacks", "Special Meal"];
+
+// Suggested purposes for spending; any other text is allowed too.
+export const EXPENSE_CATEGORIES = ["Office supplies", "Kitchen & food", "Cleaning", "Maintenance", "Electrical", "Lab & teaching", "Room equipment", "Furniture", "Fixed assets", "IT"];
+
+// A text box that suggests the usual expense categories.
+export function ExpenseCategoryInput({ id, value, onChange }) {
+  return (
+    <>
+      <input id={id} list={`${id}-list`} value={value} onChange={(e) => onChange(e.target.value)} placeholder="e.g. Office supplies" className={inputClass} />
+      <datalist id={`${id}-list`}>{EXPENSE_CATEGORIES.map((category) => <option key={category} value={category} />)}</datalist>
+    </>
+  );
+}
+
+// The parts of inventory an organisation can switch on in Setup.
+export const FEATURE_INFO = {
+  PURCHASING: { label: "Purchasing", text: "Suppliers, purchase orders and goods received notes." },
+  BATCHES: { label: "Batches & expiry", text: "Batch numbers and expiry dates, first-expiry-first-out." },
+  TRANSFERS: { label: "Store transfers", text: "Move stock between stores with approval." },
+  ASSETS: { label: "Assets", text: "Equipment and furniture tracked one by one." },
+  REQUISITIONS: { label: "Requisitions", text: "Departments and staff ask for items; a manager approves; the store issues." },
+  KITCHEN: { label: "Kitchen & consumption", text: "Daily use and wastage, meals served and cost per meal." },
+  ROOMS: { label: "Room inventory", text: "What each hostel room holds: fans, lights, beds..." },
+};
+
+export const PROFILE_INFO = {
+  SCHOOL: { label: "School, college or university", text: "Stores, labs, purchasing, assets and requisitions." },
+  HOSTEL: { label: "Hostel, mess or boarding house", text: "Kitchen and food stock, room assets, purchasing and requisitions." },
+  OFFICE: { label: "Office or organisation", text: "Office supplies, department requisitions and assets." },
+  CUSTOM: { label: "Custom", text: "Pick the parts yourself." },
+};
+
+export const REQ_LABELS = { SUBMITTED: "Waiting approval", APPROVED: "Approved", REJECTED: "Rejected", PARTIAL: "Part issued", ISSUED: "Issued", RECEIVED: "Received", CLOSED: "Closed short", CANCELLED: "Cancelled" };
+const REQ_TONES = { SUBMITTED: "amber", APPROVED: "blue", REJECTED: "red", PARTIAL: "purple", ISSUED: "blue", RECEIVED: "green", CLOSED: "slate", CANCELLED: "slate" };
 
 const TONES = {
   green: "bg-green-100 text-green-700",
@@ -29,7 +72,7 @@ const TONES = {
 
 const KIND_TONES = {
   OPENING: "slate", RECEIPT: "green", RETURN: "green", ISSUE: "blue", ADJUSTMENT: "amber", DAMAGE: "red", LOSS: "red",
-  TRANSFER_OUT: "purple", TRANSFER_IN: "purple", REVERSAL: "slate",
+  TRANSFER_OUT: "purple", TRANSFER_IN: "purple", REVERSAL: "slate", CONSUMPTION: "blue", WASTAGE: "red",
 };
 
 export const STOCK_LABELS = { OK: "In stock", LOW: "Low stock", OUT: "Out of stock", OVER: "Overstock" };
@@ -53,6 +96,7 @@ export const TransferBadge = ({ status }) => <Badge tone={TRANSFER_TONES[status]
 export const PO_LABELS = { DRAFT: "Draft", APPROVED: "Approved", PARTIAL: "Partly received", RECEIVED: "Received", CLOSED: "Closed short", CANCELLED: "Cancelled" };
 const PO_TONES = { DRAFT: "slate", APPROVED: "blue", PARTIAL: "amber", RECEIVED: "green", CLOSED: "purple", CANCELLED: "red" };
 export const PoBadge = ({ status }) => <Badge tone={PO_TONES[status]}>{PO_LABELS[status] || status}</Badge>;
+export const RequisitionBadge = ({ status }) => <Badge tone={REQ_TONES[status]}>{REQ_LABELS[status] || status}</Badge>;
 
 // How close a batch is to its expiry date.
 export function ExpiryBadge({ batch }) {
@@ -117,16 +161,21 @@ export function ItemPicker({ items, exclude = [], onPick, id = "item-search", la
 
 const DOC_MODES = {
   receive: { title: "Stock In (Goods Received)", submit: "Receive", party: "Supplier", partyKey: "supplier", reference: "Supplier invoice / challan no.", withCost: true, withBatch: true },
-  issue: { title: "Issue Stock", submit: "Issue", party: "Issued to (department, lab or person) *", partyKey: "issuedTo", reference: "Requisition no.", withCost: false },
+  issue: { title: "Issue Stock", submit: "Issue", party: "Issued to (department, lab or person) *", partyKey: "issuedTo", reference: "Requisition no.", withCost: false, withCategory: true },
   return: { title: "Take Back Stock", submit: "Take back", party: "Returned by *", partyKey: "returnedBy", reference: "Reference", withCost: false, withBatch: true },
   transfer: { title: "Request Transfer", submit: "Request", withCost: false },
+  // Used up inside the organisation: cooked, cleaned with, used in a lab. Not issued to anyone.
+  consume: { title: "Record Use (Consumption)", submit: "Record use", withCost: false, withCategory: true, withMeal: true, noParty: true },
+  waste: { title: "Record Wastage", submit: "Record wastage", withCost: false, withCategory: true, noParty: true, noteLabel: "Reason *", noteKey: "reason" },
 };
 
-// One form for receipts, issues, returns and transfer requests: a store, who, and item lines.
-export function StockDocumentForm({ mode, items, stores, onSubmit, onClose }) {
+// One form for receipts, issues, returns, transfer requests, use and wastage: a store, who, and item lines.
+export function StockDocumentForm({ mode, items, stores, onSubmit, onClose, defaultStoreId = "" }) {
   const config = DOC_MODES[mode];
   const open = stores.filter((store) => store.isActive);
-  const [head, setHead] = useState({ storeId: open[0]?.id || "", toStoreId: open[1]?.id || "", party: "", reference: "", note: "" });
+  const [head, setHead] = useState({
+    storeId: defaultStoreId || open[0]?.id || "", toStoreId: open[1]?.id || "", party: "", reference: "", note: "", meal: "", expenseCategory: "",
+  });
   const [lines, setLines] = useState([]);
   const setLine = (index, patch) => setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   const total = lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitCost || 0), 0);
@@ -139,16 +188,21 @@ export function StockDocumentForm({ mode, items, stores, onSubmit, onClose }) {
         ...(config.withCost ? { unitCost: Number(line.unitCost || 0) } : {}),
         ...(config.withBatch && line.item.trackBatches ? { batchNo: line.batchNo, expiresOn: line.expiresOn || undefined } : {}),
       })),
-      note: head.note,
+      [config.noteKey || "note"]: head.note,
     };
+    if (config.withCategory) body.expenseCategory = head.expenseCategory;
+    if (config.withMeal) body.meal = head.meal || undefined;
     if (mode === "transfer") Object.assign(body, { fromStoreId: head.storeId, toStoreId: head.toStoreId });
+    else if (config.noParty) body.storeId = head.storeId;
     else Object.assign(body, { storeId: head.storeId, reference: head.reference, [config.partyKey]: head.party });
     await onSubmit(body);
   };
 
+  const storeLabel = { transfer: "From store *", issue: "Issue from store *", consume: "Used from store *", waste: "Wasted in store *" }[mode] || "Into store *";
+
   return (
     <FormModal title={config.title} submitLabel={config.submit} onSubmit={submit} onClose={onClose}>
-      <Field id="doc-store" label={mode === "transfer" ? "From store *" : mode === "issue" ? "Issue from store *" : "Into store *"}>
+      <Field id="doc-store" label={storeLabel}>
         <select id="doc-store" value={head.storeId} onChange={(e) => setHead({ ...head, storeId: e.target.value })} className={inputClass}>
           {open.map((store) => <option key={store.id} value={store.id}>{store.name} ({store.code})</option>)}
         </select>
@@ -159,17 +213,30 @@ export function StockDocumentForm({ mode, items, stores, onSubmit, onClose }) {
             {open.map((store) => <option key={store.id} value={store.id}>{store.name} ({store.code})</option>)}
           </select>
         </Field>
-      ) : (
+      ) : !config.noParty && (
         <Field id="doc-party" label={config.party}>
           <input id="doc-party" value={head.party} onChange={(e) => setHead({ ...head, party: e.target.value })} className={inputClass} />
         </Field>
       )}
-      {mode !== "transfer" && (
+      {mode !== "transfer" && !config.noParty && (
         <Field id="doc-ref" label={config.reference}>
           <input id="doc-ref" value={head.reference} onChange={(e) => setHead({ ...head, reference: e.target.value })} className={inputClass} />
         </Field>
       )}
-      <Field id="doc-note" label="Note">
+      {config.withMeal && (
+        <Field id="doc-meal" label="For meal">
+          <select id="doc-meal" value={head.meal} onChange={(e) => setHead({ ...head, meal: e.target.value })} className={inputClass}>
+            <option value="">Not for a meal</option>
+            {MEALS.map((meal) => <option key={meal} value={meal}>{meal}</option>)}
+          </select>
+        </Field>
+      )}
+      {config.withCategory && (
+        <Field id="doc-category" label="Expense category">
+          <ExpenseCategoryInput id="doc-category" value={head.expenseCategory} onChange={(value) => setHead({ ...head, expenseCategory: value })} />
+        </Field>
+      )}
+      <Field id="doc-note" label={config.noteLabel || "Note"}>
         <input id="doc-note" value={head.note} onChange={(e) => setHead({ ...head, note: e.target.value })} className={inputClass} />
       </Field>
       {/* A batch-tracked item can be received in several batches, so it can be picked again. */}
@@ -288,7 +355,8 @@ export function Barcode({ value, height = 48, module = 1.6, showText = true }) {
 
 export function LinkCard({ href, title, text, count, icon }) {
   return (
-    <a href={href} className="group rounded-xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:shadow-sm">
+    // next/link swaps the page in place, without a full browser reload.
+    <Link href={href} className="group rounded-xl border border-slate-200 bg-white p-4 transition hover:border-blue-300 hover:shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <span className="text-2xl" aria-hidden="true">{icon}</span>
         {count !== undefined && <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">{count}</span>}
@@ -296,6 +364,6 @@ export function LinkCard({ href, title, text, count, icon }) {
       <p className="mt-3 font-semibold text-slate-800 group-hover:text-blue-700">{title}</p>
       <p className="mt-1 text-sm text-slate-500">{text}</p>
       <span className={`mt-3 inline-block text-sm ${linkButton}`}>Open →</span>
-    </a>
+    </Link>
   );
 }

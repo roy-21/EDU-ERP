@@ -107,26 +107,63 @@ function AlertSettings({ canEdit, onClose, onSaved }) {
   );
 }
 
+// Someone who can only ask the store for items sees their requisitions, not the stock.
+function RequesterHome() {
+  return (
+    <SystemShell title="Inventory" subtitle="Ask the store for the items you need.">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <LinkCard href="/admin/inventory/requisitions" title="My Requisitions" text="Raise a requisition and follow it until the items arrive." icon="📝" />
+      </div>
+    </SystemShell>
+  );
+}
+
 export default function InventoryDashboard() {
   const { can, isReady } = useMe();
-  const load = useCallback(() => Promise.all([inventoryApi.summary(), inventoryApi.alerts()]), []);
+  const canRead = can("inventory.read");
+  const load = useCallback(() => (canRead ? Promise.all([inventoryApi.summary(), inventoryApi.alerts(), inventoryApi.settings()]) : Promise.resolve(null)), [canRead]);
   const { data, error, isLoading, reload } = useData(load);
   const [showSettings, setShowSettings] = useState(false);
 
-  if (isReady && !can("inventory.read")) return <NoAccess />;
-  const [summary, alerts = []] = data || [];
+  if (isReady && !canRead) return can("inventory.request_items") ? <RequesterHome /> : <NoAccess />;
+  const [summary, alerts = [], settings] = data || [];
+  // Until the settings load, show everything rather than flash a short menu.
+  const on = (feature) => !settings || settings.features.includes(feature);
 
   const sections = [
     { href: "/admin/inventory/items", title: "Items & Stock", text: "Stock items, levels, reorder points and value.", icon: "📦", count: summary?.items },
-    { href: "/admin/inventory/stock", title: "Stock Ledger", text: "Receive, issue, take back, count and write off.", icon: "🧾" },
-    { href: "/admin/inventory/purchases", title: "Purchases", text: "Suppliers, purchase orders and goods received.", icon: "🛒", count: summary ? summary.openPurchaseOrders + summary.draftPurchaseOrders : undefined },
-    { href: "/admin/inventory/batches", title: "Batches & Expiry", text: "Expiry dates, soonest first; write off expired stock.", icon: "⏳", count: summary ? summary.expiredBatches + summary.expiringBatches : undefined },
-    { href: "/admin/inventory/transfers", title: "Transfers", text: "Move stock between stores, with approval.", icon: "🔁", count: summary ? summary.pendingTransfers + summary.inTransit : undefined },
-    { href: "/admin/inventory/assets", title: "Assets", text: "Computers, lab equipment, furniture: who has what.", icon: "💻", count: summary?.assets.total },
-    { href: "/admin/inventory/stores", title: "Stores", text: "Central store, lab stores and other locations.", icon: "🏬", count: summary?.stores },
+    { href: "/admin/inventory/stock", title: "Stock Ledger", text: "Receive, issue, use, take back, count and write off.", icon: "🧾" },
+    on("REQUISITIONS") && { href: "/admin/inventory/requisitions", title: "Requisitions", text: "Requests from departments and rooms: approve, then issue.", icon: "📝", count: summary ? summary.requisitionsWaiting + summary.requisitionsToIssue : undefined },
+    on("KITCHEN") && { href: "/admin/inventory/kitchen", title: "Kitchen & Consumption", text: "Daily use and wastage, meals served, cost per meal.", icon: "🍲" },
+    on("ROOMS") && { href: "/admin/inventory/rooms", title: "Room Inventory", text: "What each hostel room holds: fans, lights, beds...", icon: "🛏️", count: summary?.roomAssets },
+    on("PURCHASING") && { href: "/admin/inventory/purchases", title: "Purchases", text: "Suppliers, purchase orders and goods received.", icon: "🛒", count: summary ? summary.openPurchaseOrders + summary.draftPurchaseOrders : undefined },
+    on("BATCHES") && { href: "/admin/inventory/batches", title: "Batches & Expiry", text: "Expiry dates, soonest first; write off expired stock.", icon: "⏳", count: summary ? summary.expiredBatches + summary.expiringBatches : undefined },
+    on("TRANSFERS") && { href: "/admin/inventory/transfers", title: "Transfers", text: "Move stock between stores, with approval.", icon: "🔁", count: summary ? summary.pendingTransfers + summary.inTransit : undefined },
+    on("ASSETS") && { href: "/admin/inventory/assets", title: "Assets", text: "Equipment and furniture: where each is and who has it.", icon: "💻", count: summary?.assets.total },
+    { href: "/admin/inventory/stores", title: "Stores", text: "Central store, kitchens, labs and other locations.", icon: "🏬", count: summary?.stores },
     { href: "/admin/inventory/barcode", title: "Barcodes & Scan", text: "Print labels and look things up with a scanner.", icon: "🏷️" },
-    { href: "/admin/inventory/reports", title: "Reports", text: "Valuation, ABC, fast and slow moving, ledger.", icon: "📊" },
-  ];
+    { href: "/admin/inventory/reports", title: "Reports", text: "Valuation, spending by purpose, reorder suggestions.", icon: "📊" },
+    { href: "/admin/inventory/setup", title: "Setup", text: "Organisation type and the parts of inventory in use.", icon: "⚙️" },
+  ].filter(Boolean);
+
+  const stats = [
+    { label: "Stock items", value: summary?.items ?? 0 },
+    { label: "Stock value", value: money(summary?.stockValue), color: "text-blue-700" },
+    { label: "Low stock", value: summary?.lowStock ?? 0, color: "text-amber-600" },
+    { label: "Out of stock", value: summary?.outOfStock ?? 0, color: "text-red-600" },
+    { label: "Today in / out", value: `${qty(summary?.todayIn)} / ${qty(summary?.todayOut)}` },
+    on("REQUISITIONS") && { label: "Requisitions to approve / issue", value: summary ? `${summary.requisitionsWaiting} / ${summary.requisitionsToIssue}` : "—", color: "text-amber-600" },
+    on("KITCHEN") && { label: "Used this month", value: money(summary?.monthConsumed) },
+    on("KITCHEN") && { label: "Wasted this month", value: money(summary?.monthWasted), color: "text-red-600" },
+    on("ROOMS") && { label: "Assets in rooms", value: summary?.roomAssets ?? 0 },
+    on("ASSETS") && { label: "Assets in service", value: summary?.assets.total ?? 0 },
+    on("ASSETS") && { label: "Asset value", value: money(summary?.assets.value) },
+    on("ASSETS") && { label: "Under repair", value: summary?.assets.underRepair ?? 0, color: "text-amber-600" },
+    on("TRANSFERS") && { label: "Transfers open", value: summary ? `${summary.pendingTransfers} pending · ${summary.inTransit} sent` : "—" },
+    on("BATCHES") && { label: "Expired / expiring batches", value: summary ? `${summary.expiredBatches} / ${summary.expiringBatches}` : "—", color: "text-red-600" },
+    on("PURCHASING") && { label: "Purchase orders open / draft", value: summary ? `${summary.openPurchaseOrders} / ${summary.draftPurchaseOrders}` : "—" },
+    { label: "Overstock", value: summary?.overStock ?? 0, color: "text-purple-700" },
+  ].filter(Boolean);
 
   return (
     <SystemShell title="Inventory" subtitle="Stock, stores and assets, live from the database."
@@ -135,23 +172,13 @@ export default function InventoryDashboard() {
         <button onClick={reload} className={secondaryButton}>Refresh</button>
       </>}>
       <ErrorBanner message={error} />
-      <StatGrid isLoading={isLoading} stats={[
-        { label: "Stock items", value: summary?.items ?? 0 },
-        { label: "Stock value", value: money(summary?.stockValue), color: "text-blue-700" },
-        { label: "Low stock", value: summary?.lowStock ?? 0, color: "text-amber-600" },
-        { label: "Out of stock", value: summary?.outOfStock ?? 0, color: "text-red-600" },
-        { label: "Today in / issued", value: `${qty(summary?.todayIn)} / ${qty(summary?.todayOut)}` },
-        { label: "Assets in service", value: summary?.assets.total ?? 0 },
-        { label: "Asset value", value: money(summary?.assets.value) },
-        { label: "Assets assigned", value: summary?.assets.assigned ?? 0, color: "text-blue-700" },
-        { label: "Under repair", value: summary?.assets.underRepair ?? 0, color: "text-amber-600" },
-        { label: "Transfers open", value: summary ? `${summary.pendingTransfers} pending · ${summary.inTransit} sent` : "—" },
-        { label: "Expired batches", value: summary?.expiredBatches ?? 0, color: "text-red-600" },
-        { label: "Expiring soon", value: summary?.expiringBatches ?? 0, color: "text-amber-600" },
-        { label: "Open purchase orders", value: summary?.openPurchaseOrders ?? 0 },
-        { label: "Draft orders", value: summary?.draftPurchaseOrders ?? 0 },
-        { label: "Overstock", value: summary?.overStock ?? 0, color: "text-purple-700" },
-      ]} />
+      {settings && !settings.isSetUp && can("inventory.update") && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+          <span><span className="font-semibold">Set up inventory for your organisation.</span> A hostel gets kitchen and room inventory, an office gets requisitions and assets, and so on.</span>
+          <Link href="/admin/inventory/setup" className={primaryButton}>Open Setup</Link>
+        </div>
+      )}
+      <StatGrid isLoading={isLoading} stats={stats} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <section className="rounded-xl border border-slate-200 bg-white p-5 lg:col-span-2">
@@ -197,7 +224,7 @@ export default function InventoryDashboard() {
           </DataTable>
         </section>
         <section className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold text-slate-800">Most issued, last 90 days</h2>
+          <h2 className="font-semibold text-slate-800">Most used, last 90 days</h2>
           <ol className="mt-3 space-y-3">
             {(summary?.topIssued || []).length === 0 && <li className="text-sm text-slate-500">Nothing issued yet.</li>}
             {(summary?.topIssued || []).map((item, index) => (

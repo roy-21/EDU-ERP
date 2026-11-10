@@ -91,6 +91,10 @@ export const MODULE_FEATURES: Record<string, { feature: string; permissions: { a
       { action: "manage_stock", label: "Receive, issue and take back stock" },
       { action: "adjust_stock", label: "Adjust counts and write off damage or loss" },
       { action: "transfer_stock", label: "Request and receive store transfers" },
+      { action: "manage_kitchen", label: "Record kitchen use, wastage and meals served" },
+    ] },
+    { feature: "Requisitions", permissions: [
+      { action: "request_items", label: "Ask the store for items (sees only their own requisitions)" },
     ] },
     { feature: "Purchasing", permissions: [
       { action: "manage_purchases", label: "Manage suppliers and draft purchase orders" },
@@ -135,13 +139,14 @@ export const SYSTEM_ROLES: Record<string, { name: string; portalType: string; de
   TEACHER: {
     name: "Teacher", portalType: "TEACHER", description: "Teaching staff.", canLogIn: true,
     permissions: ["student.read", "classroom.read", "attendance.read", "attendance.create", "attendance.update", "examination.read",
-      "examination.create", "library.read", "lms.read", "notice.read"],
+      "examination.create", "library.read", "lms.read", "notice.read", "inventory.request_items"],
   },
   STOREKEEPER: {
-    name: "Storekeeper", portalType: "STAFF", description: "Runs the stores: receives, issues and transfers stock and looks after assets.", canLogIn: true,
-    permissions: ["inventory.read", "inventory.manage_stock", "inventory.transfer_stock", "inventory.manage_assets", "inventory.export", "notice.read"],
+    name: "Storekeeper", portalType: "STAFF", description: "Runs the stores: receives, issues and transfers stock, records kitchen use and looks after assets.", canLogIn: true,
+    permissions: ["inventory.read", "inventory.manage_stock", "inventory.transfer_stock", "inventory.manage_assets", "inventory.manage_kitchen",
+      "inventory.request_items", "inventory.export", "notice.read"],
   },
-  STAFF: { name: "Staff", portalType: "STAFF", description: "General staff with notice access.", permissions: ["notice.read"], canLogIn: true },
+  STAFF: { name: "Staff", portalType: "STAFF", description: "General staff: notices, and asking the store for items.", permissions: ["notice.read", "inventory.request_items"], canLogIn: true },
   STUDENT: { name: "Student", portalType: "STUDENT", description: "Uses the student portal for their own records.", permissions: [], canLogIn: true },
   GUARDIAN: { name: "Guardian", portalType: "GUARDIAN", description: "Uses the guardian portal.", permissions: [], canLogIn: true },
   NOT_SYSTEM_USER: {

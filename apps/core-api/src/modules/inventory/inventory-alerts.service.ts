@@ -2,8 +2,8 @@ import { postgresService } from "../../database/postgres";
 import { newId } from "../hostel/hostel.common";
 import { isSmtpConfigured, renderEmailHtml, sendSmtpMail } from "../hostel/hostel-email.service";
 import { Actor, audit } from "../identity/identity.service";
-import { fail, todayBd, whole } from "../academics/academics.common";
-import { insightsService, settingsOf } from "./inventory.service";
+import { fail, oneOf, todayBd, whole } from "../academics/academics.common";
+import { FEATURES, PROFILES, insightsService, settingsOf } from "./inventory.service";
 
 // The daily inventory alert email: one digest per institution per day, to the addresses set here.
 // The in-app alert list is the same list; email only carries it to people who are not looking.
@@ -42,6 +42,22 @@ export const alertSettingsService = {
     );
     await audit(postgresService, actor, "inventory.settings", "inventory", actor.institutionId,
       `Alert email ${emailAlerts ? `on to ${recipients.join(", ")}` : "off"}; expiry warning ${expiryWarningDays} days.`);
+    return this.get(actor.institutionId);
+  },
+
+  // The kind of organisation and the parts of inventory it uses. Switching a part off only
+  // hides it from the menus and dashboard; nothing is deleted, so it can be switched on again.
+  async saveSetup(actor: Actor, body: any) {
+    const profile = oneOf(body?.profile, "Organisation type", Object.keys(PROFILES));
+    const raw = Array.isArray(body?.features) ? body.features : PROFILES[profile];
+    const unknown = raw.find((key: unknown) => !(FEATURES as readonly unknown[]).includes(key));
+    if (unknown !== undefined) fail(400, `Unknown inventory part "${unknown}".`);
+    const features = FEATURES.filter((key) => raw.includes(key));
+    await postgresService.query(
+      `INSERT INTO inv_settings (institution_id, profile, features) VALUES ($1, $2, $3)
+       ON CONFLICT (institution_id) DO UPDATE SET profile = $2, features = $3`,
+      [actor.institutionId, profile, features]);
+    await audit(postgresService, actor, "inventory.setup", "inventory", actor.institutionId, `Inventory set up for ${profile.toLowerCase()}: ${features.join(", ") || "core only"}.`);
     return this.get(actor.institutionId);
   },
 

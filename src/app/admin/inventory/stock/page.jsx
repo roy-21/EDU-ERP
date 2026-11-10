@@ -24,6 +24,8 @@ const CSV_COLUMNS = [
   { label: "Batch", value: (m) => m.batchNo },
   { label: "Expiry", value: (m) => m.expiresOn },
   { label: "Party", value: (m) => m.party },
+  { label: "Expense category", value: (m) => m.expenseCategory },
+  { label: "Meal", value: (m) => m.meal },
   { label: "Reference", value: (m) => m.reference },
   { label: "Note", value: (m) => m.note },
   { label: "By", value: (m) => m.createdBy },
@@ -99,6 +101,9 @@ export default function StockPage() {
           <button disabled={noStores} onClick={() => setForm("issue")} className={secondaryButton}>Issue</button>
           <button disabled={noStores} onClick={() => setForm("return")} className={secondaryButton}>Take Back</button>
         </>}
+        {(can("inventory.manage_stock") || can("inventory.manage_kitchen")) && (
+          <button disabled={noStores} onClick={() => setForm("consume")} className={secondaryButton}>Record Use</button>
+        )}
         {can("inventory.adjust_stock") && <>
           <button disabled={noStores} onClick={() => setForm("count")} className={secondaryButton}>Stock Count</button>
           <button disabled={noStores} onClick={() => setForm("writeOff")} className={secondaryButton}>Write Off</button>
@@ -133,7 +138,7 @@ export default function StockPage() {
               <td className={`px-4 py-3 font-medium tabular-nums ${m.quantity < 0 ? "text-red-600" : "text-green-700"}`}>{signed(m.quantity)} <span className="text-xs font-normal">{m.unit}</span></td>
               <td className="px-4 py-3 tabular-nums">{money(Math.abs(m.value))}</td>
               <td className="px-4 py-3 tabular-nums">{qty(m.balanceAfter)}</td>
-              <td className="max-w-xs px-4 py-3 text-xs text-slate-600">{[m.batchNo && `Batch ${m.batchNo}`, m.party, m.reference && `Ref ${m.reference}`, m.note].filter(Boolean).join(" · ") || "—"}</td>
+              <td className="max-w-xs px-4 py-3 text-xs text-slate-600">{[m.batchNo && `Batch ${m.batchNo}`, m.party, m.reference && `Ref ${m.reference}`, m.expenseCategory, m.note].filter(Boolean).join(" · ") || "—"}</td>
               <td className="px-4 py-3">
                 {can("inventory.approve") && !m.isReversed && !["REVERSAL", "TRANSFER_IN", "TRANSFER_OUT"].includes(m.kind) && (
                   <button onClick={() => reverse(m)} className={linkButton}>Reverse</button>
@@ -148,6 +153,7 @@ export default function StockPage() {
       {form === "receive" && <StockDocumentForm mode="receive" items={items} stores={stores} onClose={() => setForm(null)} onSubmit={async (body) => posted(await inventoryApi.receive(body), "Received:")} />}
       {form === "issue" && <StockDocumentForm mode="issue" items={items} stores={stores} onClose={() => setForm(null)} onSubmit={async (body) => posted(await inventoryApi.issue(body), "Issued:")} />}
       {form === "return" && <StockDocumentForm mode="return" items={items} stores={stores} onClose={() => setForm(null)} onSubmit={async (body) => posted(await inventoryApi.takeBack(body), "Taken back:")} />}
+      {form === "consume" && <StockDocumentForm mode="consume" items={items} stores={stores} onClose={() => setForm(null)} onSubmit={async (body) => posted(await inventoryApi.consume(body), "Use recorded:")} />}
       {form === "count" && (
         <QuickForm title="Stock Count" submitLabel="Save count" onClose={() => setForm(null)}
           initial={{ storeId: openStores[0]?.id || "" }}
@@ -166,10 +172,11 @@ export default function StockPage() {
           initial={{ storeId: openStores[0]?.id || "", kind: "DAMAGE" }}
           fields={[
             { name: "storeId", label: "Store *", type: "select", options: storeOptions },
-            { name: "kind", label: "Type *", type: "select", noBlank: true, options: [["DAMAGE", "Damaged / expired"], ["LOSS", "Lost / stolen"]] },
+            { name: "kind", label: "Type *", type: "select", noBlank: true, options: [["DAMAGE", "Damaged / expired"], ["LOSS", "Lost / stolen"], ["WASTAGE", "Wasted / spoilt"]] },
             { name: "itemId", label: "Item *", type: "select", options: itemOptions, wide: true },
             { name: "quantity", label: "Quantity *", type: "number", step: "any", min: 0, hint: "Batch-tracked items: soonest expiry first. To write off one batch, use Batches & Expiry." },
             { name: "reason", label: "Reason *" },
+            { name: "expenseCategory", label: "Expense category", hint: "e.g. Kitchen & food, Maintenance" },
           ]}
           onSubmit={async (body) => posted(await inventoryApi.writeOff(body), "Written off:")} />
       )}

@@ -401,7 +401,7 @@ export const sidebarModules = [
       {
         title: "Inventory Features",
         href: "/admin/inventory",
-        notes: ["Items & Stock", "Stock Ledger", "Purchases", "Batches & Expiry", "Transfers", "Assets", "Stores", "Barcode", "Reports"]
+        notes: ["Items & Stock", "Stock Ledger", "Requisitions", "Kitchen & Consumption", "Room Inventory", "Purchases", "Batches & Expiry", "Transfers", "Assets", "Stores", "Barcode", "Reports", "Setup"]
       }
     ]
   },
