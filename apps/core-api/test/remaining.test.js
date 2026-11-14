@@ -253,6 +253,9 @@ test("subscription billing: priced modules, once per period, payments and void",
   assert.strictEqual(invoice.amount, 3300);
   assert.deepStrictEqual(invoice.lines.map((line) => line.moduleId).sort(), ["hostel", "library"]);
   assert.strictEqual(invoice.periodStart, `${new Date().toISOString().slice(0, 7)}-01`);
+  // Billing turned on mid-month still gives ten days from today, never an invoice overdue at birth.
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  assert.strictEqual(invoice.dueDate, new Date(Date.parse(`${todayUtc}T00:00:00Z`) + 10 * 86_400_000).toISOString().slice(0, 10));
 
   const pay = (body) => platform.call("POST", `/platform/billing/${invoice.id}/payments`, body, "SUPER_ADMIN");
   assert.strictEqual((await pay({ amount: 5000, method: "Bank Transfer", reference: "B-1" })).status, 400, "no overpaying");

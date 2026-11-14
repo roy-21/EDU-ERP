@@ -1,0 +1,11 @@
+flowchart TB
+  UP["Admin uploads a document<br/>POST /assistant/documents"] --> D1[("ai_documents<br/>status: QUEUED")]
+  D1 --> SCH["Assistant scheduler<br/>(checks at a fixed interval)"]
+  SCH --> P["status: PROCESSING"]
+  P --> EX["Voice API /extract<br/>read text from the file<br/>(pypdf · python-docx · text)"]
+  EX --> CH["Core API: clean text,<br/>split into chunks,<br/>compute search terms"]
+  CH --> EM["Voice API /embed<br/>Ollama bge-m3 vectors"]
+  EM --> C[("ai_chunks<br/>content · terms · embedding")]
+  C --> R["status: READY<br/>chunk_count · embedded_chunks"]
+  EX -.->|"error"| F["status: FAILED<br/>retried later (attempts, next_attempt_at)"]
+  EM -.->|"no embedding provider"| C

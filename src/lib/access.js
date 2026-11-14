@@ -13,6 +13,12 @@ const PAGE_RULES = [
   { prefix: "/admin/system/features", any: ["system.manage_features"] },
 ];
 
+// Pages anyone may open once their institution subscribes to the module, without its permissions.
+const MODULE_ONLY = [
+  { path: "/admin/voice-ai", moduleId: "voice-ai" },
+  { path: "/admin/voice-ai/assistant/ask", moduleId: "voice-ai" },
+];
+
 const under = (pathname, prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`);
 
 // Any one permission inside the module opens it. Built-in admin roles hold every permission of their subscription.
@@ -23,6 +29,8 @@ export const pathAccess = (me, pathname) => {
   if (!me || !pathname?.startsWith("/admin")) return { ok: true };
   const path = pathname.split("?")[0].replace(/\/$/, "");
   if (path === "/admin" || SELF_SERVICE.some((prefix) => under(path, prefix))) return { ok: true };
+  const open = MODULE_ONLY.find((item) => item.path === path);
+  if (open) return !me.modules || me.modules.includes(open.moduleId) ? { ok: true } : { ok: false, notSubscribed: true, reason: "Your institution's subscription does not include this module." };
   const [, , section, moduleId, featureKey] = path.split("/");
   if (section === "platform") return me.role === "SUPER_ADMIN" ? { ok: true } : { ok: false, reason: "Only the platform's super admin can open this page." };
   if (section === "features") {

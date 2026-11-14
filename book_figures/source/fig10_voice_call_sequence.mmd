@@ -1,0 +1,30 @@
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant FE as Frontend (browser)
+  participant CORE as Core API
+  participant V as Voice API
+  participant DB as PostgreSQL
+  U->>FE: Start voice call
+  FE->>CORE: POST /assistant/voice/calls
+  CORE->>V: POST /voice/web/sessions
+  V->>DB: Insert voice_sessions
+  V-->>CORE: session id
+  loop Each spoken turn
+    U->>FE: Speak (microphone recording)
+    FE->>CORE: POST /assistant/voice/calls/:id/turn (audio, base64)
+    CORE->>V: /sessions/:id/listen
+    V->>V: Speech-to-text (faster-whisper, Bangla/English)
+    V->>DB: Insert voice_turns (CALLER)
+    V-->>CORE: text + language
+    CORE->>CORE: askService.ask(text, channel VOICE) — same answer flow as text
+    CORE->>V: /sessions/:id/speak (answer text)
+    V->>V: Text-to-speech (MMS: mms-tts-ben / mms-tts-eng)
+    V->>DB: Insert voice_turns (ASSISTANT)
+    V-->>CORE: WAV audio (base64)
+    CORE-->>FE: answer text + audio
+    FE-->>U: Play answer (text still shown if speech fails)
+  end
+  U->>FE: End call
+  FE->>CORE: POST /assistant/voice/calls/:id/end
+  CORE->>V: /sessions/:id/end

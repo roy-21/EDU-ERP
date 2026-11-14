@@ -6,6 +6,8 @@
     "dev": "next dev",
     "dev:backend": "npm --prefix apps/core-api run dev",
     "build:backend": "npm --prefix apps/core-api run build",
+    "dev:ollama": "taskkill /IM \"ollama app.exe\" /IM ollama.exe /F >nul 2>&1 & ping -n 3 127.0.0.1 >nul & set OLLAMA_NUM_GPU=0&& ollama serve",
+    "dev:voice":"cd apps/voice-api && .venv\\Scripts\\python -X utf8 -m uvicorn app.main:app --port 8050",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

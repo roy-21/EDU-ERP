@@ -1,0 +1,27 @@
+sequenceDiagram
+  autonumber
+  actor User
+  participant FE as Frontend (Next.js)
+  participant API as Core API
+  participant DB as PostgreSQL
+  User->>FE: Enter username/email and password
+  FE->>API: POST /api/v1/auth/login
+  API->>DB: Find user in erp_users
+  alt Account locked (locked_until in the future)
+    API-->>FE: 423 Too many failed attempts
+  else Wrong password (bcrypt compare fails)
+    API->>DB: failed_logins + 1 (5th failure locks for 15 min), audit "Sign-in Failed"
+    API-->>FE: 401 Invalid credentials
+  else Account or institution not active
+    API-->>FE: 403 Account disabled / institution not active
+  else Password correct
+    API->>DB: Reset failed_logins, set last_login_at, audit "Signed In"
+    API-->>FE: JWT (8 h, or 15 min if must_change_password) + role, permissions, modules
+  end
+  opt must_change_password = true
+    FE->>User: Ask for a new password
+    FE->>API: POST /api/v1/auth/change-password
+    API->>DB: Store new bcrypt hash (older tokens stop working)
+    API-->>FE: Fresh JWT
+  end
+  FE->>FE: Keep token, open /admin or /portal by role

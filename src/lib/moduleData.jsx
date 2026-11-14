@@ -586,6 +586,47 @@ export const sidebarModules = [
     icon: "📞",
     subMenus: [
       {
+        title: "🏠 Assistant Home",
+        href: "/admin/voice-ai",
+        notes: ["Answers from your own uploaded documents (PDF, Word, text) and admin-approved answers", "Live answers from the ERP: meals, menu, attendance, results, dues", "Unknown questions forwarded to the responsible person by SMS / email", "Admin reviews every answer before the AI learns it", "Read-only: it can never change a record"]
+      },
+      {
+        title: "📊 Assistant Analytics",
+        href: "/admin/voice-ai/assistant",
+        requires: "voice-ai.view_analytics"
+      },
+      {
+        title: "💬 Ask or Talk",
+        href: "/admin/voice-ai/assistant/ask",
+        notes: ["Type or talk with the microphone, in English or Bangla", "Questions forwarded to you appear here"]
+      },
+      {
+        title: "📚 Knowledge Base",
+        href: "/admin/voice-ai/assistant/knowledge",
+        notes: ["Upload, replace and remove documents", "Approved answers"]
+      },
+      {
+        title: "✅ Knowledge Review",
+        href: "/admin/voice-ai/assistant/review",
+        requires: "voice-ai.review_knowledge"
+      },
+      {
+        title: "📨 Forwarded Questions",
+        href: "/admin/voice-ai/assistant/escalations",
+        requires: "voice-ai.manage_escalations"
+      },
+      {
+        title: "👤 Responsible Persons",
+        href: "/admin/voice-ai/assistant/setup",
+        requires: "voice-ai.manage_escalations"
+      },
+      {
+        title: "🎧 Voice Calls",
+        href: "/admin/voice-ai/assistant/calls",
+        requires: "voice-ai.view_analytics",
+        notes: ["Website voice calls with transcripts", "Speech recognition and voice run on your own server"]
+      },
+      {
         title: "📞 Dual-Channel Call Support",
         href: "/admin/voice-ai/channels",
         notes: ["Phone Number (SIP / Twilio / Vonage Integration)", "Website Voice Widget (WebRTC Click-to-Call Button)"]

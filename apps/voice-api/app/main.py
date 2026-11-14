@@ -7,7 +7,6 @@ It has its own entry point, API surface, database ownership, and deployment life
 """
 
 from fastapi import FastAPI, HTTPException, Header, Depends
-from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List
 
 from app.config import voice_settings
@@ -16,6 +15,8 @@ from app.models import (
     CallSession, CallHistoryQuery
 )
 from app import session_manager
+from app.assistant.routes import router as assistant_router, require_service
+from app.voice.routes import router as voice_web_router
 
 app = FastAPI(
     title="Institution ERP — Voice Assistant Backend",
@@ -23,13 +24,22 @@ app = FastAPI(
     version="1.0.0"
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Only the Core ERP calls this service, server to server, so browsers get no CORS access.
+app.include_router(assistant_router)
+app.include_router(voice_web_router)
+
+
+@app.on_event("startup")
+def load_local_models():
+    # Loading a local model can take a minute; do it in the background so the service starts at once.
+    import os
+    import threading
+    from app.assistant import llm
+    if os.getenv("ASSISTANT_WARM_UP", "on") != "off":
+        threading.Thread(target=llm.warm_up, daemon=True).start()
+    if os.getenv("VOICE_WARM_UP", "on") != "off":
+        from app.voice import speech
+        threading.Thread(target=speech.warm_up, daemon=True).start()
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -61,7 +71,7 @@ def health_check():
 # ─────────────────────────────────────────────────────────────────────
 # Inbound Call Webhook (Twilio / SIP / WebRTC Gateway)
 # ─────────────────────────────────────────────────────────────────────
-@app.post("/api/v1/voice/webhook/inbound")
+@app.post("/api/v1/voice/webhook/inbound", dependencies=[Depends(require_service)])
 def inbound_call_webhook(payload: InboundWebhookPayload):
     """
     Receives inbound call event from telephony gateway (Twilio, SIP, WebRTC).
@@ -91,7 +101,7 @@ def inbound_call_webhook(payload: InboundWebhookPayload):
 # ─────────────────────────────────────────────────────────────────────
 # Call Simulation — Full Multi-Turn Dialogue Pipeline
 # ─────────────────────────────────────────────────────────────────────
-@app.post("/api/v1/voice/simulate/call")
+@app.post("/api/v1/voice/simulate/call", dependencies=[Depends(require_service)])
 def simulate_call(req: SimulateCallRequest):
     """
     Diagnostic endpoint that simulates a full inbound call:
@@ -154,7 +164,7 @@ def simulate_call(req: SimulateCallRequest):
 # ─────────────────────────────────────────────────────────────────────
 # Call History & Transcript Retrieval
 # ─────────────────────────────────────────────────────────────────────
-@app.get("/api/v1/voice/calls/history")
+@app.get("/api/v1/voice/calls/history", dependencies=[Depends(require_service)])
 def call_history(
     institution_id: Optional[str] = None,
     has_objection: Optional[bool] = None,
@@ -187,7 +197,7 @@ def call_history(
     }
 
 
-@app.get("/api/v1/voice/calls/{session_id}")
+@app.get("/api/v1/voice/calls/{session_id}", dependencies=[Depends(require_service)])
 def get_call_detail(session_id: str):
     session = session_manager.get_session(session_id)
     if not session:

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "async_hooks";
 import { Pool, PoolClient } from "pg";
 import fs from "fs";
 import path from "path";
@@ -5,15 +6,36 @@ import { seedIdentity } from "../modules/identity/identity.seed";
 
 const SCHEMA_MIGRATION_LOCK = 7420001;
 
+const readOnlyScope = new AsyncLocalStorage<boolean>();
+
+// The Voice & Message Assistant Backend writes call sessions and transcripts straight to the
+// shared database, as its own login with rights on those two tables only. Row Level Security
+// (see schema.sql) keeps it inside the institution it names for each transaction.
+const ensureVoiceServiceRole = async (client: PoolClient) => {
+  const password = process.env.VOICE_DB_PASSWORD;
+  if (!password) return;
+  await client.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'voice_service') THEN CREATE ROLE voice_service LOGIN; END IF;
+    END $$`);
+  const alter = (await client.query("SELECT format('ALTER ROLE voice_service WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD %L', $1::text) AS sql", [password])).rows[0].sql;
+  await client.query(alter);
+  await client.query("GRANT USAGE ON SCHEMA public TO voice_service");
+  await client.query("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM voice_service");
+  await client.query("GRANT SELECT, INSERT, UPDATE ON voice_sessions, voice_turns TO voice_service");
+};
+
 class PostgresDatabaseService {
   private pool: Pool | null = null;
+  private readOnlyPool: Pool | null = null;
   private isConnected: boolean = false;
+  private connectionString: string;
 
   constructor() {
     const connectionString =
       process.env.ERP_DATABASE_URL ||
       process.env.DATABASE_URL ||
       "postgresql://erp_user:erp_secret@localhost:5432/erp_db";
+    this.connectionString = connectionString;
 
     try {
       this.pool = new Pool({
@@ -49,6 +71,7 @@ class PostgresDatabaseService {
           await client.query(schemaSql);
           // Inside the lock, so two servers starting together cannot seed twice.
           await seedIdentity(client);
+          await ensureVoiceServiceRole(client);
         } finally {
           await client.query("SELECT pg_advisory_unlock($1)", [SCHEMA_MIGRATION_LOCK]);
         }
@@ -91,7 +114,32 @@ class PostgresDatabaseService {
     if (!this.pool || !this.isConnected) {
       throw new Error("PostgreSQL is not connected");
     }
-    return this.pool.query(text, params);
+    return this.activePool().query(text, params);
+  }
+
+  // Runs work so that every query it makes, through any service, goes through a pool whose
+  // sessions are read-only. Postgres itself then refuses any write ("cannot execute INSERT in a
+  // read-only transaction"), so code reached from here can read but never change data.
+  public readOnly<T>(work: () => Promise<T>): Promise<T> {
+    if (!this.readOnlyPool) {
+      this.readOnlyPool = new Pool({
+        connectionString: this.connectionString,
+        connectionTimeoutMillis: 3000,
+        idleTimeoutMillis: 10000,
+        max: 5,
+        options: "-c default_transaction_read_only=on",
+      });
+    }
+    return readOnlyScope.run(true, work);
+  }
+
+  // True inside readOnly(), where code must not even try to write.
+  public isReadOnly(): boolean {
+    return Boolean(readOnlyScope.getStore());
+  }
+
+  private activePool(): Pool {
+    return readOnlyScope.getStore() && this.readOnlyPool ? this.readOnlyPool : (this.pool as Pool);
   }
 
   public async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -99,7 +147,7 @@ class PostgresDatabaseService {
       throw new Error("PostgreSQL is not connected");
     }
 
-    const client = await this.pool.connect();
+    const client = await this.activePool().connect();
     try {
       await client.query("BEGIN");
       const result = await work(client);

@@ -1,0 +1,18 @@
+flowchart TB
+  U["<b>Users</b> (web browser)<br/>Super Admin · Institution Admin · Teacher · Accountant · Hostel Warden<br/>Storekeeper · Staff · custom roles · Student · Guardian"]
+  FE["<b>Frontend</b><br/>Next.js 16 · React 19 · Tailwind CSS v4 · Zustand<br/>Admin panel (32 modules) · Student/Guardian portal · Assistant<br/><i>port 3000</i>"]
+  CORE["<b>Core API</b><br/>Node.js · Express · TypeScript<br/>JWT authentication · RBAC · institution scoping<br/>business logic · gateway to AI and Voice services<br/><i>port 4000</i>"]
+  AI["<b>AI API</b><br/>Python · FastAPI · scikit-learn<br/>student risk prediction · GPA forecast<br/>course question answering · objection classifier<br/><i>port 8000</i>"]
+  VOICE["<b>Voice API</b><br/>Python · FastAPI<br/>document text extraction · embeddings · answer drafting<br/>speech-to-text (faster-whisper) · text-to-speech (MMS)<br/><i>port 8050</i>"]
+  OLL["<b>Ollama</b> (local)<br/>qwen2.5:7b — language model<br/>bge-m3 — embeddings"]
+  DB[("<b>PostgreSQL 16</b><br/>ERP database<br/>119 tables")]
+  MAIL["Email server<br/>(SMTP)"]
+
+  U --> FE
+  FE -->|"REST / JSON<br/>Bearer JWT"| CORE
+  CORE -->|"REST<br/>X-Service-Token"| AI
+  CORE -->|"REST<br/>X-Service-Token"| VOICE
+  VOICE --> OLL
+  CORE <-->|"read / write"| DB
+  VOICE -->|"call transcripts<br/>(voice_service login, row-level security)"| DB
+  CORE -->|"notifications"| MAIL

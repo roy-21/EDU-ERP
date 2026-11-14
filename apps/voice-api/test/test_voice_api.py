@@ -4,9 +4,11 @@ Tests session management, NLP objection detection, and person routing locally.
 """
 
 from fastapi.testclient import TestClient
+from app.config import settings
 from app.main import app
 
-client = TestClient(app)
+# Only the Core ERP calls this service, always with the service token.
+client = TestClient(app, headers={"X-Service-Token": settings.SERVICE_SECRET})
 
 
 def test_voice_health():

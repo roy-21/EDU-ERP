@@ -1,0 +1,19 @@
+flowchart TB
+  REQ["HTTP request to /api/v1/..."] --> CTX["Request context"]
+  CTX --> CORS["CORS + JSON body parser (10 MB)"]
+  CORS --> CID["Correlation ID header (X-Correlation-Id)"]
+  CID --> PUB{"Public route?<br/>health · login · public hostel ·<br/>public identity · assistant reply link"}
+  PUB -->|yes| HANDLER
+  PUB -->|no| SVC{"X-Service-Token from<br/>AI or Voice service?"}
+  SVC -->|yes| INTERNAL["Act as SERVICE_INTERNAL<br/>for the given institution"] --> HANDLER
+  SVC -->|no| JWT{"Valid Bearer JWT?"}
+  JWT -->|no| E401["401 Unauthorized"]
+  JWT -->|yes| LOAD["Load user from database on every request<br/>(disabled account, changed role or suspended<br/>institution take effect at once)"]
+  LOAD --> MCP{"must_change_password?"}
+  MCP -->|yes| E403["403 PASSWORD_CHANGE_REQUIRED"]
+  MCP -->|no| PERM{"Route permission check<br/>(permission key, e.g. finance.read)"}
+  PERM -->|denied| E403b["403 Forbidden"]
+  PERM -->|allowed| HANDLER["Module router<br/>identity · portal · settings · institution · academics ·<br/>finance · notice · library · HR · inventory · assistant ·<br/>objection · AI gateway · voice gateway · hostel · ERP"]
+  HANDLER --> SQL["SQL queries scoped by institution_id"]
+  classDef err fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class E401,E403,E403b err;

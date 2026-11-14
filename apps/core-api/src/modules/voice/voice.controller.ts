@@ -1,10 +1,15 @@
 import { Router, Request, Response } from "express";
 import { config } from "../../config/environment";
+import { requirePermissionKey } from "../../middleware/auth.middleware";
+
+// Call history and test calls go to the Voice & Message Assistant Backend; only people who run
+// module 32 may use them.
+const canSeeCalls = requirePermissionKey("voice-ai.view_analytics", "voice-ai.manage_escalations");
 
 export const voiceGatewayRouter = Router();
 
 // Retrieve Call History from Voice Backend
-voiceGatewayRouter.get("/voice/calls", async (req: Request, res: Response): Promise<void> => {
+voiceGatewayRouter.get("/voice/calls", canSeeCalls, async (req: Request, res: Response): Promise<void> => {
   try {
     const institutionId = req.institutionId || "inst-001";
     const voiceRes = await fetch(`${config.voiceApiUrl}/voice/calls/history?institution_id=${institutionId}&limit=50`, {
@@ -30,7 +35,7 @@ voiceGatewayRouter.get("/voice/calls", async (req: Request, res: Response): Prom
 });
 
 // Trigger Call Simulation via Voice Backend
-voiceGatewayRouter.post("/voice/simulate", async (req: Request, res: Response): Promise<void> => {
+voiceGatewayRouter.post("/voice/simulate", canSeeCalls, async (req: Request, res: Response): Promise<void> => {
   try {
     const institutionId = req.institutionId || "inst-001";
     const { callerPhone, callerName, channel, messages } = req.body;

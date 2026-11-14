@@ -1,0 +1,20 @@
+flowchart TB
+  Q["User asks a question (text or voice, Bangla or English)<br/>POST /api/v1/assistant/ask · rate-limited per user"] --> LANG["Detect language and intent"]
+  LANG --> I{"Intent"}
+  I -->|"ACTION<br/>(asks to change data)"| REF["Refuse and write audit log<br/>status: REFUSED · mode: RULE"]
+  I -->|"LIVE_DATA"| LIVE["Read the asker's own ERP records<br/>meal count · meal menu/time · attendance ·<br/>result · fees due · application<br/>source: ERP · mode: RULE"]
+  I -->|"General question"| SEARCH["Search institution knowledge (ai_chunks)<br/>approved answers + document chunks<br/>word match and embedding similarity"]
+  SEARCH --> LLM{"Language model<br/>available?"}
+  LLM -->|yes| GEN["Voice API /answer → Ollama qwen2.5:7b<br/>may use only the given passages and cites them"]
+  GEN -->|"answerable"| ANS1["status: ANSWERED · mode: LLM"]
+  GEN -->|"no passages / not answerable"| ESC
+  GEN -->|"model error"| EXT
+  LLM -->|no| EXT{"Approved answer ≥ threshold (default 0.6)<br/>or document text ≥ 0.75?"}
+  EXT -->|yes| ANS2["Return the stored text<br/>status: ANSWERED · mode: EXTRACTIVE"]
+  EXT -->|no| ESC["Forward to a responsible person<br/>status: ESCALATED (see escalation figure)"]
+  REF --> SAVE
+  LIVE --> SAVE
+  ANS1 --> SAVE
+  ANS2 --> SAVE
+  ESC --> SAVE["Save in ai_questions<br/>answer · source · mode · confidence · sources · channel"]
+  SAVE --> FB["User may rate the answer (feedback)"]

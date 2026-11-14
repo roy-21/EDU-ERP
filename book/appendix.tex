@@ -1,0 +1,1111 @@
+\clearpage
+\chapter*{SOURCE CODE}
+\addcontentsline{toc}{chapter}{SOURCE CODE}
+
+% Languages that the listings package does not define by default.
+\lstdefinelanguage{JavaScript}{
+  keywords={async, await, break, case, catch, class, const, continue, default, delete, do, else, export, extends, false, finally, for, from, function, if, import, in, instanceof, let, new, null, return, static, super, switch, this, throw, true, try, typeof, undefined, var, void, while, of},
+  sensitive=true, comment=[l]{//}, morecomment=[s]{/*}{*/}, morestring=[b]', morestring=[b]", morestring=[b]`
+}
+\lstdefinelanguage{TypeScript}[]{JavaScript}{
+  morekeywords={interface, type, enum, implements, private, public, readonly, as, any, string, number, boolean, never, unknown, Promise, Record}
+}
+\lstdefinelanguage{YAML}{
+  sensitive=false, comment=[l]{\#}, morestring=[b]', morestring=[b]"
+}
+
+% =========================
+% 1) src/middleware.js
+% =========================
+\section*{\normalsize\nolinkurl{src/middleware.js}}
+
+\begin{lstlisting}[language=JavaScript]
+import { NextResponse } from "next/server";
+
+export function middleware(request) {
+  const { pathname } = request.nextUrl;
+  const token = request.cookies.get("erp_access_token")?.value;
+
+  // Protect the admin panel and the student portal
+  if (pathname.startsWith("/admin") || pathname.startsWith("/portal")) {
+    if (!token) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("from", pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  // If already logged in and visiting /login, send to /admin
+  if (pathname === "/login" && token) {
+    return NextResponse.redirect(new URL("/admin", request.url));
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ["/admin/:path*", "/portal/:path*", "/portal", "/login"],
+};
+\end{lstlisting}
+
+% =========================
+% 2) src/lib/api.js
+% =========================
+\section*{\normalsize\nolinkurl{src/lib/api.js}}
+
+\begin{lstlisting}[language=JavaScript]
+// src/lib/api.js
+// Centralized API Client for NextGen ERP Frontend -> Core ERP Backend (Port 4000)
+
+const CORE_API_BASE_URL =
+  process.env.NEXT_PUBLIC_CORE_API_URL || "http://localhost:4000/api/v1";
+
+/**
+ * Standard HTTP Request helper
+ */
+async function request(endpoint, options = {}) {
+  const url = `${CORE_API_BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+
+  // Default headers (Tenant Context + Correlation ID)
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Tenant-Id": "inst-001",
+    "X-Correlation-Id": `fe_${Date.now()}`,
+    ...(options.headers || {})
+  };
+
+  // Attach token from localStorage if available in browser
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("erp_access_token");
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+  }
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      // The account was disabled, its password changed, or the session expired: sign in again.
+      const isSignIn = endpoint.startsWith("/auth/login") || endpoint.startsWith("/auth/change-password");
+      if (typeof window !== "undefined" && !isSignIn && headers.Authorization &&
+          (response.status === 401 || errorData.code === "PASSWORD_CHANGE_REQUIRED")) {
+        localStorage.removeItem("erp_access_token");
+        localStorage.removeItem("erp_user");
+        document.cookie = "erp_access_token=; path=/; max-age=0";
+        window.location.href = `/login?from=${encodeURIComponent(window.location.pathname)}`;
+      }
+      throw new Error(
+        errorData.error || `HTTP ${response.status}: ${response.statusText}`
+      );
+    }
+
+    const json = await response.json();
+    return json.data !== undefined ? json.data : json;
+  } catch (err) {
+    console.warn(`[Core ERP API Warning] Request to ${url} failed:`, err.message);
+    throw err;
+  }
+}
+
+export const api = {
+  get: (endpoint, headers) => request(endpoint, { method: "GET", headers }),
+  post: (endpoint, body, headers) =>
+    request(endpoint, { method: "POST", body: JSON.stringify(body), headers }),
+  put: (endpoint, body, headers) =>
+    request(endpoint, { method: "PUT", body: JSON.stringify(body), headers }),
+  delete: (endpoint, headers) => request(endpoint, { method: "DELETE", headers })
+};
+
+export default api;
+\end{lstlisting}
+
+% =========================
+% 3) apps/core-api/src/app.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/app.ts}}
+
+\begin{lstlisting}[language=TypeScript]
+export function createApp(): Application {
+  const app = express();
+
+  // Behind a reverse proxy, TRUST_PROXY (for example "1" or "loopback") lets Express read the client's
+  // real IP from X-Forwarded-For. Off by default, because anyone can send that header.
+  if (process.env.TRUST_PROXY) app.set("trust proxy", /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
+  app.use(requestContext);
+
+  // Middleware
+  app.use(cors({ origin: true, credentials: true }));
+  app.use(express.json({ limit: "10mb" }));
+
+  // Global Correlation ID and Access Logger
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const correlationId = req.headers["x-correlation-id"] || `req_${Date.now()}`;
+    res.setHeader("X-Correlation-Id", correlationId as string);
+    next();
+  });
+
+  // Base API v1 Routes
+  const apiRouter = express.Router();
+
+  // Public / Health Routes
+  apiRouter.use(healthRouter);
+  apiRouter.use(authRouter);
+  apiRouter.use(hostelPublicRouter);
+  apiRouter.use(publicIdentityRouter);
+  apiRouter.use(assistantPublicRouter);
+
+  // Protected Routes
+  apiRouter.use(authMiddleware);
+  apiRouter.use(identityRouter);
+  apiRouter.use(portalRouter);
+  apiRouter.use(settingsRouter);
+  apiRouter.use(institutionRouter);
+  apiRouter.use(academicsRouter);
+  apiRouter.use(financeRouter);
+  apiRouter.use(noticeRouter);
+  apiRouter.use(libraryRouter);
+  apiRouter.use(hrRouter);
+  apiRouter.use(inventoryRouter);
+  apiRouter.use(assistantRouter);
+  apiRouter.use(objectionRouter);
+  apiRouter.use(aiGatewayRouter);
+  apiRouter.use(voiceGatewayRouter);
+  apiRouter.use(hostelRouter);
+  apiRouter.use(hostelRentRouter);
+  apiRouter.use(hostelGatewayRouter);
+  apiRouter.use(hostelOperationsRouter);
+  apiRouter.use(erpRouter);
+
+  app.use("/api/v1", apiRouter);
+\end{lstlisting}
+
+% =========================
+% 4) apps/core-api/src/middleware/auth.middleware.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/middleware/auth.middleware.ts}}
+
+\begin{lstlisting}[language=TypeScript]
+
+// Who is calling is read from the database on every request, never trusted from the
+// token alone, so a disabled account, a new role or a suspended institution applies at once.
+export async function authMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (req.path === "/api/v1/health") return next();
+
+  // Calls from the AI and voice services.
+  const serviceToken = req.headers["x-service-token"];
+  if (serviceToken && (serviceToken === config.serviceSecretAi || serviceToken === config.serviceSecretVoice)) {
+    const instId = (req.headers["x-institution-id"] as string) || "inst-001";
+    req.user = {
+      userId: "service-caller",
+      institutionId: instId,
+      role: "SERVICE_INTERNAL",
+      email: "internal@service",
+      permissions: [...ALL_PERMISSION_KEYS],
+      modules: [...MODULE_IDS],
+    };
+    req.institutionId = instId;
+    return next();
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    deny(res, 401, "Missing or malformed Authorization header.");
+    return;
+  }
+
+  let decoded: any;
+  try {
+    decoded = jwt.verify(authHeader.split(" ")[1], config.jwtSecret);
+  } catch {
+    deny(res, 401, "Invalid, expired, or untrusted access token.");
+    return;
+  }
+
+  if (!postgresService.isLive()) {
+    deny(res, 503, "The account database is unavailable. Try again shortly.");
+    return;
+  }
+
+  try {
+    const { principal, problem } = await loadPrincipal(String(decoded.userId || ""), Number(decoded.iat || 0));
+    if (!principal) {
+      deny(res, problem!.status, problem!.message);
+      return;
+    }
+    req.user = {
+      userId: principal.userId,
+      institutionId: principal.institutionId,
+      role: principal.role,
+      email: principal.email,
+      username: principal.username,
+      fullName: principal.fullName,
+      permissions: principal.permissions,
+      modules: principal.modules,
+      linkedType: principal.linkedType,
+      linkedId: principal.linkedId,
+    };
+    req.institutionId = principal.institutionId;
+    if (principal.mustChangePassword && req.path !== "/auth/me") {
+      deny(res, 403, "Change your temporary password before continuing.", "PASSWORD_CHANGE_REQUIRED");
+      return;
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+\end{lstlisting}
+
+% =========================
+% 5) apps/core-api/src/modules/auth/auth.controller.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/modules/auth/auth.controller.ts}}
+
+\begin{lstlisting}[language=TypeScript]
+const PORTAL_HOME: Record<string, string> = { STUDENT: "/portal", GUARDIAN: "/portal" };
+
+const session = (principal: Principal) => {
+  const token = jwt.sign(
+    { userId: principal.userId, institutionId: principal.institutionId, role: principal.role, email: principal.email, username: principal.username },
+    config.jwtSecret,
+    // A temporary password only buys enough time to choose a new one.
+    { expiresIn: principal.mustChangePassword ? "15m" : "8h" }
+  );
+  return {
+    token,
+    mustChangePassword: principal.mustChangePassword,
+    home: PORTAL_HOME[principal.role] || "/admin",
+    user: {
+      id: principal.userId,
+      email: principal.email,
+      username: principal.username,
+      fullName: principal.fullName,
+      role: principal.role,
+      roleName: principal.roleName,
+      institutionId: principal.institutionId,
+      institutionName: principal.tenantName,
+      permissions: principal.permissions,
+      modules: principal.modules,
+    },
+  };
+};
+
+authRouter.post("/auth/login", route(async (req: Request, res: Response) => {
+  const { username, email, password } = req.body || {};
+  const identifier = typeof username === "string" && username ? username : email;
+  if (typeof identifier !== "string" || !identifier || typeof password !== "string" || !password) {
+    res.status(400).json({ success: false, statusCode: 400, error: "Username/email and password are required." });
+    return;
+  }
+  send(res, 200, session(await authenticate(identifier, password)));
+}));
+\end{lstlisting}
+
+% =========================
+% 6) apps/core-api/src/modules/identity/identity.service.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/modules/identity/identity.service.ts}}
+
+\begin{lstlisting}[language=TypeScript]
+export const temporaryPassword = (): string => {
+  const sets = ["ABCDEFGHJKLMNPQRSTUVWXYZ", "abcdefghjkmnpqrstuvwxyz", "23456789", "@#$%&!"];
+  const all = sets.join("");
+  const chars = [...sets.map((set) => set[randomInt(set.length)]), ...Array.from({ length: 8 }, () => all[randomInt(all.length)])];
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+};
+\end{lstlisting}
+
+\begin{lstlisting}[language=TypeScript]
+
+export const authenticate = async (identifier: string, password: string) => {
+  const value = identifier.trim().toLowerCase();
+  const { rows } = await postgresService.query(
+    `${PRINCIPAL} WHERE LOWER(u.username) = $1 OR LOWER(u.email) = $1`,
+    [value]
+  );
+  const byUsername = rows.filter((row: any) => row.username.toLowerCase() === value);
+  const candidates = byUsername.length > 0 ? byUsername : rows;
+  if (candidates.length > 1) fail(400, "This email is used at more than one institution. Sign in with your username.");
+  const row = candidates[0];
+  if (!row) {
+    await bcrypt.compare(password, ALWAYS_HASH);
+    fail(401, "Invalid credentials.");
+  }
+
+  if (row.locked_until && new Date(row.locked_until) > new Date()) {
+    const minutes = Math.ceil((new Date(row.locked_until).getTime() - Date.now()) / 60_000);
+    fail(423, `Too many failed attempts. Try again in ${minutes} minute(s).`);
+  }
+
+  const valid = row.password_hash.startsWith("$2") && (await bcrypt.compare(password, row.password_hash));
+  if (!valid) {
+    await postgresService.query(
+      `UPDATE erp_users SET failed_logins = failed_logins + 1,
+         locked_until = CASE WHEN failed_logins + 1 >= $2 THEN NOW() + ($3 || ' minutes')::interval ELSE locked_until END
+       WHERE id = $1`,
+      [row.id, MAX_FAILED_LOGINS, String(LOCK_MINUTES)]
+    );
+    // The attempt goes on the account's own activity, so its admin can see it.
+    await audit(postgresService, { institutionId: row.institution_id, userId: row.id, email: row.email || row.username }, "Sign-in Failed", "Session", row.id,
+      `Wrong password for ${row.username}${row.failed_logins + 1 >= MAX_FAILED_LOGINS ? `; locked for ${LOCK_MINUTES} minutes` : ""}.`);
+    fail(401, "Invalid credentials.");
+  }
+
+  if (row.status !== "ACTIVE") fail(403, row.tenant_status === "PENDING" ? "Your institution's registration is still being reviewed." : "This account is disabled.");
+  if (SYSTEM_ROLES[row.role] && !SYSTEM_ROLES[row.role].canLogIn) fail(403, "This person does not have system access.");
+  if (row.tenant_status !== "ACTIVE") fail(403, row.tenant_status === "PENDING" ? "Your institution's registration is still being reviewed." : "Your institution's account is not active.");
+  if (row.maintenance_mode === "true" && !ADMIN_ROLES.has(row.role)) fail(503, "The system is under maintenance. Please try again later.");
+
+  await postgresService.query("UPDATE erp_users SET failed_logins = 0, locked_until = NULL, last_login_at = NOW() WHERE id = $1", [row.id]);
+  await audit(postgresService, { institutionId: row.institution_id, userId: row.id, email: row.email || row.username }, "Signed In", "Session", row.id, `${row.username} signed in.`);
+  return principalFromRow(row);
+\end{lstlisting}
+
+% =========================
+% 7) apps/core-api/src/database/schema.sql
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/database/schema.sql}}
+
+\begin{lstlisting}[language=SQL]
+CREATE TABLE IF NOT EXISTS erp_users (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    username VARCHAR(100) NOT NULL,
+    email VARCHAR(255),
+    phone VARCHAR(30),
+    full_name VARCHAR(150) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(64) NOT NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'INACTIVE')),
+    must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
+    linked_type VARCHAR(30),
+    linked_id VARCHAR(64),
+    profile JSONB NOT NULL DEFAULT '{}',
+    failed_logins INTEGER NOT NULL DEFAULT 0,
+    locked_until TIMESTAMP WITH TIME ZONE,
+    last_login_at TIMESTAMP WITH TIME ZONE,
+    password_changed_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by VARCHAR(255) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+\end{lstlisting}
+
+\begin{lstlisting}[language=SQL]
+
+ALTER TABLE voice_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE voice_turns ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS voice_sessions_tenant ON voice_sessions;
+CREATE POLICY voice_sessions_tenant ON voice_sessions
+    USING (institution_id = current_setting('app.institution_id', true))
+    WITH CHECK (institution_id = current_setting('app.institution_id', true));
+DROP POLICY IF EXISTS voice_turns_tenant ON voice_turns;
+CREATE POLICY voice_turns_tenant ON voice_turns
+    USING (institution_id = current_setting('app.institution_id', true))
+    WITH CHECK (institution_id = current_setting('app.institution_id', true));
+\end{lstlisting}
+
+% =========================
+% 8) apps/core-api/src/modules/academics/teaching.service.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/modules/academics/teaching.service.ts}}
+
+\begin{lstlisting}[language=TypeScript]
+
+// The highest grade whose lowest mark the percentage reaches.
+export const gradeFor = (config: any, percent: number) => {
+  const ranges = [...config.gradeRanges].sort((a: any, b: any) => b.minMark - a.minMark);
+  const range = ranges.find((item: any) => percent >= item.minMark) || ranges[ranges.length - 1];
+  return { letter: range.letter as string, gradePoint: Number(range.gradePoint), passed: percent >= Number(config.passMarks) && Number(range.gradePoint) > 0 };
+\end{lstlisting}
+
+\begin{lstlisting}[language=TypeScript]
+  // Results go out only when every exam is in and locked and the weights make 100.
+  async publish(req: Request, classId: string, publish: boolean) {
+    if (!has(req, "examination.approve") && !["ADMIN", "SUPER_ADMIN"].includes(req.user?.role || "")) fail(403, "Publishing results needs approve rights.");
+    const results = await this.classResults(req, classId);
+    if (publish) {
+      if (results.totalWeight !== 100) fail(409, `The exams of this session carry ${results.totalWeight}%, not 100%.`);
+      if (!results.allLocked) fail(409, "Lock the marks of every exam first.");
+    }
+    const actor = actorOf(req);
+    await postgresService.query("UPDATE acad_classes SET results_published_at = $2, results_published_by = $3 WHERE id = $1", [classId, publish ? new Date() : null, publish ? actor.email : ""]);
+    await audit(postgresService, actor, publish ? "Published" : "Withdrawn", "Results", classId, `${publish ? "Published" : "Withdrew"} results of ${results.class.courseCode} ${results.class.sectionLabel}.`);
+    return this.classResults(req, classId);
+\end{lstlisting}
+
+% =========================
+% 9) apps/core-api/src/modules/assistant/assistant-text.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/modules/assistant/assistant-text.ts}}
+
+\begin{lstlisting}[language=TypeScript]
+export const intentOf = (question: string): Intent => {
+  if (isActionRequest(question)) return { kind: "ACTION" };
+  const personal = PERSONAL.test(question);
+  for (const item of LIVE_PATTERNS) {
+    if (item.pattern.test(question) && (!item.personal || personal)) return { kind: "LIVE_DATA", topic: item.topic };
+  }
+  return { kind: "KNOWLEDGE" };
+};
+\end{lstlisting}
+
+% Bangla text in the original is shown as [bn].
+\begin{lstlisting}[language=TypeScript, escapeinside={(*@}{@*)}]
+export const chunkText = (value: string, size = 900, overlap = 150): string[] => {
+  const text = cleanText(value);
+  if (!text) return [];
+  const pieces: string[] = [];
+  for (const paragraph of text.split(/\n\s*\n/)) {
+    if (paragraph.length <= size) {
+      pieces.push(paragraph.trim());
+      continue;
+    }
+    // A long paragraph is split at sentence ends, and a very long sentence by length.
+    let rest = paragraph.trim();
+    while (rest.length > size) {
+      const window = rest.slice(0, size);
+      const stop = Math.max(window.lastIndexOf(". "), window.lastIndexOf("(*@\textit{[bn]}@*) "), window.lastIndexOf("? "), window.lastIndexOf("\n"));
+      const cut = stop > size * 0.5 ? stop + 1 : size;
+      pieces.push(rest.slice(0, cut).trim());
+      rest = rest.slice(cut).trim();
+    }
+    if (rest) pieces.push(rest);
+  }
+  const chunks: string[] = [];
+  let current = "";
+  for (const piece of pieces) {
+    if (current && current.length + piece.length + 2 > size) {
+      chunks.push(current);
+      const tail = current.slice(-overlap);
+      const start = tail.search(/\s/);
+      current = `${start >= 0 ? tail.slice(start + 1) : tail}\n\n${piece}`;
+    } else {
+      current = current ? `${current}\n\n${piece}` : piece;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.filter((chunk) => termsOf(chunk).length > 0);
+};
+\end{lstlisting}
+
+% =========================
+% 10) apps/core-api/src/modules/assistant/assistant-knowledge.service.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/modules/assistant/assistant-knowledge.service.ts}}
+
+\begin{lstlisting}[language=TypeScript]
+export const searchKnowledge = async (institutionId: string, question: string, limit = 6): Promise<Hit[]> => {
+  const queryTerms = termsOf(question);
+  if (queryTerms.length === 0) return [];
+  const live = `(c.document_id IS NOT NULL AND d.status = 'READY') OR (c.knowledge_id IS NOT NULL AND k.status = 'ACTIVE')`;
+  const total = Number((await postgresService.query(
+    `SELECT COUNT(*) AS n FROM ai_chunks c LEFT JOIN ai_documents d ON d.id = c.document_id LEFT JOIN ai_knowledge k ON k.id = c.knowledge_id
+     WHERE c.institution_id = $1 AND (${live})`, [institutionId])).rows[0].n);
+  if (total === 0) return [];
+  const df = new Map<string, number>(
+    (await postgresService.query(
+      `SELECT t AS term, COUNT(*)::int AS n FROM ai_chunks c LEFT JOIN ai_documents d ON d.id = c.document_id LEFT JOIN ai_knowledge k ON k.id = c.knowledge_id,
+         unnest(c.terms) t WHERE c.institution_id = $1 AND c.terms && $2 AND t = ANY($2) AND (${live}) GROUP BY t`,
+      [institutionId, queryTerms]
+    )).rows.map((row: any) => [row.term, row.n])
+  );
+  const idf = (term: string) => Math.log(1 + (total - (df.get(term) || 0) + 0.5) / ((df.get(term) || 0) + 0.5));
+  const weight = (terms: string[]) => terms.reduce((sum, term) => sum + idf(term), 0);
+  const questionWeight = weight(queryTerms);
+
+  const select = `SELECT c.id, c.content, c.terms, c.embedding, c.embedding_model, c.document_id, c.knowledge_id, d.title AS doc_title,
+      k.question AS k_question, k.answer AS k_answer, k.explanation AS k_explanation
+    FROM ai_chunks c LEFT JOIN ai_documents d ON d.id = c.document_id LEFT JOIN ai_knowledge k ON k.id = c.knowledge_id
+    WHERE c.institution_id = $1 AND (${live})`;
+  const lexical = (await postgresService.query(`${select} AND c.terms && $2 LIMIT 400`, [institutionId, queryTerms])).rows;
+
+  // With an embedding provider, passages that share meaning but no words are found too.
+  let queryVector: number[] | null = null;
+  let semanticRows: any[] = [];
+  const embedded = await embedAll([question], "query");
+  if (embedded.vectors[0]) {
+    queryVector = embedded.vectors[0];
+    // Vectors from different models cannot be compared, so only the current model's are used.
+    semanticRows = (await postgresService.query(`${select} AND c.embedding IS NOT NULL AND c.embedding_model = $2 LIMIT 3000`, [institutionId, embedded.model])).rows;
+  }
+
+  const rows = new Map<string, any>();
+  for (const row of [...lexical, ...semanticRows]) rows.set(row.id, row);
+  const avgLength = 150;
+  const hits: Hit[] = [];
+  for (const row of rows.values()) {
+    const words = wordsOf(row.content);
+    const counts = new Map<string, number>();
+    for (const word of words) counts.set(word, (counts.get(word) || 0) + 1);
+    const matched = queryTerms.filter((term) => counts.has(term));
+    const coverage = questionWeight ? weight(matched) / questionWeight : 0;
+    let bm25 = 0;
+    for (const term of matched) {
+      const tf = counts.get(term) as number;
+      bm25 += idf(term) * ((tf * 2.2) / (tf + 1.2 * (0.25 + 0.75 * (words.length / avgLength))));
+    }
+    let similarity = 0;
+    if (row.knowledge_id) {
+      const storedTerms = termsOf(row.k_question);
+      const shared = storedTerms.filter((term) => queryTerms.includes(term));
+      const forward = questionWeight ? weight(shared) / questionWeight : 0;
+      const backward = storedTerms.length ? weight(shared) / weight(storedTerms) : 0;
+      similarity = forward + backward > 0 ? (2 * forward * backward) / (forward + backward) : 0;
+    }
+    const semantic = queryVector && row.embedding && row.embedding_model === embedded.model ? cosine(queryVector, row.embedding.map(Number)) : null;
+    const lexicalScore = row.knowledge_id ? Math.max(similarity, coverage * 0.9) : coverage;
+    const score = semantic === null ? lexicalScore + bm25 / 100 : 0.5 * lexicalScore + 0.5 * Math.max(0, semantic) + bm25 / 100;
+    if (lexicalScore === 0 && (semantic === null || semantic < 0.5)) continue;
+    hits.push({
+      chunkId: row.id,
+      kind: row.knowledge_id ? "KNOWLEDGE" : "DOCUMENT",
+      sourceId: row.knowledge_id || row.document_id,
+      title: row.knowledge_id ? "Approved answer" : row.doc_title,
+      text: row.content,
+      answer: row.knowledge_id ? row.k_answer : null,
+      explanation: row.knowledge_id ? row.k_explanation : null,
+      coverage: Math.round(coverage * 1000) / 1000,
+      similarity: Math.round(similarity * 1000) / 1000,
+      semantic: semantic === null ? null : Math.round(semantic * 1000) / 1000,
+      score: Math.round(score * 1000) / 1000,
+    });
+  }
+  return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+};
+\end{lstlisting}
+
+% =========================
+% 11) apps/core-api/src/modules/assistant/assistant.service.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/modules/assistant/assistant.service.ts}}
+
+% Bangla text in the original is shown as [bn].
+\begin{lstlisting}[language=TypeScript, escapeinside={(*@}{@*)}]
+const fromKnowledge = async (institutionId: string, question: string, lang: Language, minConfidence: number): Promise<Outcome | null> => {
+  const hits = await searchKnowledge(institutionId, question, 6);
+  const status = await assistantEngine.status();
+
+  // With a language model: it may only use the passages given, and says when they do not answer.
+  if (status.llm) {
+    // Shared words, or close meaning. With bge-m3, unrelated text scores about 0.4 and a
+    // matching passage 0.6 or more, so meaning alone must reach 0.55.
+    const passages = hits.filter((hit) => Math.max(hit.coverage, hit.similarity) >= 0.2 || (hit.semantic ?? 0) >= 0.55);
+    if (passages.length === 0) return null;
+    try {
+      const institution = (await postgresService.query("SELECT name FROM erp_tenants WHERE id = $1", [institutionId])).rows[0]?.name || "";
+      const result = await assistantEngine.answer({
+        question,
+        language: lang,
+        institution,
+        passages: passages.map<Passage>((hit) => ({
+          id: hit.chunkId,
+          title: hit.kind === "KNOWLEDGE" ? "Approved answer" : hit.title,
+          text: hit.kind === "KNOWLEDGE" ? `Question: ${hit.text.split("\n")[0].replace(/^Question: /, "")}\nAnswer: ${hit.answer}${hit.explanation ? `\n${hit.explanation}` : ""}` : hit.text,
+        })),
+      });
+      if (!result.answerable || !result.answer.trim()) return null;
+      const used = passages.filter((hit) => result.usedSourceIds.includes(hit.chunkId));
+      const cited = used.length ? used : passages.slice(0, 1);
+      return {
+        status: "ANSWERED",
+        answer: result.answer.trim(),
+        source: cited.some((hit) => hit.kind === "KNOWLEDGE") ? "KNOWLEDGE" : "DOCUMENT",
+        mode: "LLM",
+        confidence: Math.min(1, Math.max(...cited.map((hit) => Math.max(hit.score, hit.semantic ?? 0)))),
+        sources: cited.map(sourceOf),
+      };
+    } catch (err: any) {
+      console.warn("[Assistant] Language model unavailable; answering from stored text only:", err.message);
+    }
+  }
+
+  // Without a language model: an approved answer to the same question, or the exact
+  // sentences of a document that clearly covers it. Otherwise, no answer.
+  const approved = hits.filter((hit) => hit.kind === "KNOWLEDGE").sort((a, b) => b.similarity - a.similarity)[0];
+  if (approved && Math.max(approved.similarity, approved.semantic ?? 0) >= minConfidence) {
+    return {
+      status: "ANSWERED",
+      answer: [approved.answer, approved.explanation].filter(Boolean).join("\n\n"),
+      source: "KNOWLEDGE",
+      mode: "EXTRACTIVE",
+      confidence: Math.max(approved.similarity, approved.semantic ?? 0),
+      sources: [sourceOf(approved)],
+    };
+  }
+  const document = hits.filter((hit) => hit.kind === "DOCUMENT").sort((a, b) => b.coverage - a.coverage)[0];
+  const documentBar = Math.max(0.75, minConfidence);
+  if (document && Math.max(document.coverage, document.semantic ?? 0) >= documentBar) {
+    return {
+      status: "ANSWERED",
+      answer: say(lang, `From "${document.title}": ${bestSentences(document.text, question)}`, `"${document.title}" (*@\textit{[bn]}@*): ${bestSentences(document.text, question)}`),
+      source: "DOCUMENT",
+      mode: "EXTRACTIVE",
+      confidence: Math.max(document.coverage, document.semantic ?? 0),
+      sources: [sourceOf(document)],
+    };
+  }
+  return null;
+};
+\end{lstlisting}
+
+\begin{lstlisting}[language=TypeScript]
+export const askService = {
+  async ask(asker: Asker, body: any, channel: "TEXT" | "VOICE" = "TEXT") {
+    const question = text(body?.question, "Question", 1000, true).replace(/\s+/g, " ");
+    if (question.length < 2) fail(400, "Ask a question.");
+    checkRate(`${asker.institutionId}:${asker.userId}`);
+    const lang = languageOf(question);
+    const intent = intentOf(question);
+    const settings = await settingsService.get(asker.institutionId);
+
+    let outcome: Outcome;
+    let topic = "";
+    if (intent.kind === "ACTION") {
+      outcome = { status: "REFUSED", answer: REFUSAL(lang), source: "REFUSAL", mode: "RULE", confidence: null, sources: [] };
+    } else if (intent.kind === "LIVE_DATA") {
+      topic = intent.topic;
+      const live = await liveDataService.answer(asker, intent.topic, question, lang, settings.timezone);
+      outcome = { status: live.status, answer: live.answer, source: "ERP", mode: "RULE", confidence: null, sources: [{ kind: "ERP", id: intent.topic, title: intent.topic }] };
+    } else {
+      const found = await fromKnowledge(asker.institutionId, question, lang, settings.minConfidence);
+      outcome = found || { status: "ESCALATED", answer: FORWARDED(lang), source: "ESCALATION", mode: "RULE", confidence: null, sources: [] };
+    }
+
+    const id = newId();
+    let escalationId: string | null = null;
+    await inTx(async (tx) => {
+      await tx.query(
+        `INSERT INTO ai_questions (id, institution_id, asked_by, asker_name, asker_role, question, language, kind, topic, status, answer, answer_source,
+           mode, confidence, sources, answered_at, channel)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+        [id, asker.institutionId, asker.userId, asker.fullName, asker.role, question, lang, intent.kind, topic, outcome.status, outcome.answer, outcome.source,
+          outcome.mode, outcome.confidence === null ? null : Math.round(outcome.confidence * 1000) / 1000, JSON.stringify(outcome.sources),
+          outcome.status === "ESCALATED" ? null : new Date(), channel]
+      );
+      if (outcome.status === "ESCALATED") escalationId = (await createEscalation(tx, asker.institutionId, id, question)).id;
+      if (outcome.status === "REFUSED") {
+        await audit(tx, { institutionId: asker.institutionId, userId: asker.userId, email: asker.fullName }, "assistant.action.refused", "ai_question", id,
+          `Refused a request to change data: "${question.slice(0, 300)}"`);
+      }
+    });
+    if (escalationId) await deliverEscalation(escalationId).catch((err) => console.error("[Assistant] Forwarding failed:", err.message));
+    return this.mine(asker, id);
+\end{lstlisting}
+
+% =========================
+% 12) apps/core-api/src/modules/assistant/assistant-escalation.service.ts
+% =========================
+\section*{\normalsize\nolinkurl{apps/core-api/src/modules/assistant/assistant-escalation.service.ts}}
+
+\begin{lstlisting}[language=TypeScript]
+export const deliverEscalation = async (escalationId: string) => {
+  const row = (await postgresService.query(
+    `SELECT e.*, q.question, q.asker_name, q.created_at AS asked_at, c.name AS person, c.phone, c.email, c.user_id, c.channels
+     FROM ai_escalations e JOIN ai_questions q ON q.id = e.question_id LEFT JOIN ai_contacts c ON c.id = e.contact_id
+     WHERE e.id = $1`, [escalationId])).rows[0];
+  if (!row || !["SENDING", "FAILED"].includes(row.status)) return;
+  if (!row.contact_id) {
+    await postgresService.query("UPDATE ai_escalations SET status = 'WAITING_ADMIN', next_attempt_at = NULL, updated_at = NOW() WHERE id = $1", [escalationId]);
+    return;
+  }
+  const brand = await institutionName(row.institution_id);
+  const link = replyLink(tokenFor(row.id, row.reply_nonce));
+  const channels: string[] = row.channels || [];
+  const statuses: Record<string, string> = { SMS: row.sms_status, EMAIL: row.email_status, CALL: row.call_status };
+  const errors: string[] = [];
+  const message = `${brand}: a question needs your answer. "${row.question.slice(0, 200)}" Answer here: ${link}`;
+
+  const attempt = async (channel: "SMS" | "EMAIL" | "CALL", send: () => Promise<void>, configured: boolean, address: string) => {
+    if (!channels.includes(channel)) return void (statuses[channel] = "NOT_USED");
+    if (statuses[channel] === "SENT") return; // already delivered on an earlier attempt
+    if (!address) return void (statuses[channel] = "NO_ADDRESS");
+    if (!configured) return void (statuses[channel] = "NOT_CONFIGURED");
+    try {
+      await send();
+      statuses[channel] = "SENT";
+    } catch (err: any) {
+      statuses[channel] = "FAILED";
+      errors.push(`${channel}: ${err.message}`);
+    }
+  };
+
+  await attempt("SMS", () => postToProvider(smsProvider() as Provider, { channel: "SMS", to: row.phone, text: message, reference: row.id }), Boolean(smsProvider()), row.phone);
+  await attempt("EMAIL", async () => {
+    const subject = `Question for you from ${brand}'s assistant`;
+    const textBody = `${row.person},\n\nSomeone asked the ${brand} assistant a question it could not answer:\n\n"${row.question}"\n\nPlease answer it here (the link works for ${LINK_DAYS} days): ${link}\n\nYour answer is reviewed by an admin before the assistant uses it.`;
+    const html = renderEmailHtml({ brand, title: "A question needs your answer", body: `${row.person}, someone asked the assistant a question it could not answer. Your answer is reviewed by an admin before the assistant uses it.`,
+      rows: [["Question", row.question.slice(0, 300)], ["Asked by", row.asker_name || "A user"]], actionUrl: link, actionLabel: "Answer the question" });
+    if (isSmtpConfigured()) await sendSmtpMail({ brand, to: row.email, subject, text: textBody, html });
+    else await postToProvider(emailProvider() as Provider, { channel: "EMAIL", to: row.email, subject, text: textBody, html, reference: row.id });
+  }, isSmtpConfigured() || Boolean(emailProvider()), row.email);
+  await attempt("CALL", () => postToProvider(callProvider() as Provider, { channel: "CALL", to: row.phone, text: `Question from ${brand}: ${row.question}`, reference: row.id }), Boolean(callProvider()), row.phone);
+
+  const reached = Object.values(statuses).includes("SENT") || (channels.includes("PANEL") && Boolean(row.user_id));
+  const failed = Object.values(statuses).includes("FAILED");
+  const attempts = Number(row.attempts) + 1;
+  let status = "SENT";
+  let next: Date | null = null;
+  let lastError = errors.join(" | ");
+  if (failed && attempts < MAX_ATTEMPTS) {
+    status = reached ? "SENT" : "FAILED";
+    next = new Date(Date.now() + 2 ** attempts * 60_000);
+  } else if (!reached) {
+    status = "WAITING_ADMIN";
+    lastError = lastError || "None of this person's channels is set up (check SMS, email and call settings). An admin needs to answer it.";
+  }
+  await postgresService.query(
+    `UPDATE ai_escalations SET status = CASE WHEN status IN ('ANSWERED', 'CLOSED') THEN status ELSE $2 END, sms_status = $3, email_status = $4, call_status = $5,
+       attempts = $6, next_attempt_at = $7, last_error = $8, updated_at = NOW() WHERE id = $1`,
+    [escalationId, status, statuses.SMS, statuses.EMAIL, statuses.CALL, attempts, next, lastError.slice(0, 1000)]
+  );
+};
+\end{lstlisting}
+
+% =========================
+% 13) apps/ai-api/app/ml/risk_model.py
+% =========================
+\section*{\normalsize\nolinkurl{apps/ai-api/app/ml/risk_model.py}}
+
+\begin{lstlisting}[language=Python]
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from typing import Tuple, List
+
+class StudentRiskPredictor:
+    def __init__(self):
+        self.version = "student_risk_rf_v1.2.0"
+        self.pipeline = self._train_baseline_model()
+
+    def _train_baseline_model(self) -> Pipeline:
+        """
+        Trains and validates a Random Forest classifier on institutional academic indicators.
+        Features: [attendance_rate, midterm_avg, assignment_rate * 100, previous_cgpa * 25, fee_default_days]
+        Target: 1 (At-Risk / Dropout Candidate), 0 (Academic Good Standing)
+        """
+        np.random.seed(42)
+        n_samples = 1000
+
+        # Feature synthesis mirroring institutional demographics
+        attendance = np.random.uniform(40, 100, n_samples)
+        midterm = np.random.uniform(30, 100, n_samples)
+        assignments = np.random.uniform(20, 100, n_samples)
+        cgpa_scaled = np.random.uniform(35, 100, n_samples)  # CGPA * 25
+        fee_days = np.random.exponential(scale=10, size=n_samples)
+
+        X = np.column_stack([attendance, midterm, assignments, cgpa_scaled, fee_days])
+
+        # Risk scoring function with non-linear penalties
+        risk_logit = (
+            - 0.04 * attendance
+            - 0.03 * midterm
+            - 0.02 * assignments
+            - 0.03 * cgpa_scaled
+            + 0.02 * fee_days
+            + 7.5
+        )
+        probs = 1 / (1 + np.exp(-risk_logit))
+        y = (probs > 0.5).astype(int)
+
+        pipe = Pipeline([
+            ("scaler", StandardScaler()),
+            ("rf", RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42))
+        ])
+        pipe.fit(X, y)
+        return pipe
+
+    def predict(self, attendance: float, midterm: float, assignment_rate: float, cgpa: float, fee_days: int) -> Tuple[float, str, List[str], List[str]]:
+        features = np.array([[attendance, midterm, assignment_rate * 100.0, cgpa * 25.0, float(fee_days)]])
+
+        # Calculate real probability of risk (Class 1)
+        prob = float(self.pipeline.predict_proba(features)[0][1])
+
+        factors = []
+        recommendations = []
+
+        if attendance < 75.0:
+            factors.append(f"Critical Attendance Deficit: {attendance:.1f}% is below 75% threshold")
+            recommendations.append("Assign Academic Advisor consultation for attendance rehabilitation")
+        if midterm < 50.0:
+            factors.append(f"Poor Midterm Performance: {midterm:.1f}/100")
+            recommendations.append("Schedule remedial tutorial sessions for core examination topics")
+        if assignment_rate < 0.60:
+            factors.append(f"Low LMS Assignment Submission Rate: {assignment_rate * 100:.1f}%")
+            recommendations.append("Send automated assignment deadline reminders via SMS")
+        if cgpa < 2.50:
+            factors.append(f"Cumulative GPA Warning: {cgpa:.2f}/4.00")
+            recommendations.append("Limit extra-curricular registrations and audit course load")
+        if fee_days > 30:
+            factors.append(f"Financial Overdue Status: {fee_days} days past due")
+            recommendations.append("Connect with Student Financial Welfare Board for scholarship or installment plan")
+
+        if prob >= 0.75:
+            level = "CRITICAL"
+        elif prob >= 0.50:
+            level = "HIGH"
+        elif prob >= 0.25:
+            level = "MEDIUM"
+        else:
+            level = "LOW"
+            if not factors:
+                factors.append("Academic metrics are within normal institutional performance thresholds.")
+                recommendations.append("Maintain current study pace and exam preparations.")
+
+        return round(prob, 4), level, factors, recommendations
+
+risk_predictor = StudentRiskPredictor()
+\end{lstlisting}
+
+% =========================
+% 14) apps/ai-api/app/ml/gpa_model.py
+% =========================
+\section*{\normalsize\nolinkurl{apps/ai-api/app/ml/gpa_model.py}}
+
+\begin{lstlisting}[language=Python]
+import numpy as np
+from sklearn.linear_model import Ridge
+from typing import Tuple, List
+
+class GpaPredictor:
+    def __init__(self):
+        self.version = "gpa_ridge_regressor_v1.0.0"
+        self.model = self._train_model()
+
+    def _train_model(self) -> Ridge:
+        np.random.seed(42)
+        n = 800
+        prior_cgpa = np.random.uniform(2.0, 4.0, n)
+        quizzes = np.random.uniform(40, 100, n)
+        midterm = np.random.uniform(40, 100, n)
+
+        # Semester GPA formula with realistic academic correlation
+        sem_gpa = (
+            0.30 * prior_cgpa
+            + 0.015 * quizzes
+            + 0.020 * midterm
+            + np.random.normal(0, 0.15, n)
+        )
+        sem_gpa = np.clip(sem_gpa, 0.0, 4.0)
+
+        X = np.column_stack([prior_cgpa, quizzes, midterm])
+        reg = Ridge(alpha=1.0)
+        reg.fit(X, sem_gpa)
+        return reg
+
+    def predict(self, current_cgpa: float, credits: float, quiz_avg: float, midterm: float) -> Tuple[float, List[float], str]:
+        X_sample = np.array([[current_cgpa, quiz_avg, midterm]])
+        predicted_term_gpa = float(self.model.predict(X_sample)[0])
+        predicted_term_gpa = max(0.0, min(4.0, predicted_term_gpa))
+
+        # Recompute cumulative GPA trajectory
+        # Weighted average of prior credits (e.g. 60 credits completed) and new term credits
+        assumed_prior_credits = 45.0
+        total_credits = assumed_prior_credits + credits
+        new_projected_cgpa = (current_cgpa * assumed_prior_credits + predicted_term_gpa * credits) / total_credits
+        new_projected_cgpa = round(float(np.clip(new_projected_cgpa, 0.0, 4.0)), 2)
+
+        ci_low = round(max(0.0, new_projected_cgpa - 0.15), 2)
+        ci_high = round(min(4.0, new_projected_cgpa + 0.15), 2)
+
+        diff = new_projected_cgpa - current_cgpa
+        if diff > 0.05:
+            trend = f"Upward trajectory (+{diff:.2f})"
+        elif diff < -0.05:
+            trend = f"Downward trajectory ({diff:.2f})"
+        else:
+            trend = f"Stable trajectory ({diff:+.2f})"
+
+        return new_projected_cgpa, [ci_low, ci_high], trend
+
+gpa_predictor = GpaPredictor()
+\end{lstlisting}
+
+% =========================
+% 15) apps/voice-api/app/voice/speech.py
+% =========================
+\section*{\normalsize\nolinkurl{apps/voice-api/app/voice/speech.py}}
+
+% Bangla text in the original is shown as [bn].
+\begin{lstlisting}[language=Python, escapeinside={(*@}{@*)}]
+def transcribe(audio: bytes, language_hint: Optional[str] = None) -> Tuple[str, str, int]:
+    """Returns (text, language "bn" or "en", length of the audio in ms)."""
+    from faster_whisper.audio import decode_audio
+
+    try:
+        samples = decode_audio(io.BytesIO(audio), sampling_rate=16000)
+    except Exception as err:
+        raise ValueError("The recording could not be read. Record again.") from err
+    audio_ms = int(len(samples) / 16)
+    if audio_ms < 300:
+        raise ValueError("The recording is too short. Hold the button while you speak.")
+    if audio_ms > MAX_SECONDS * 1000:
+        raise ValueError(f"The recording is longer than {MAX_SECONDS} seconds. Ask a shorter question.")
+    with _lock:
+        language = language_hint if language_hint in ("bn", "en") else None
+        if language is None:
+            # Only Bangla and English are expected; pick the likelier of the two.
+            _, _, probabilities = _load_whisper().detect_language(samples)
+            scores = dict(probabilities)
+            language = "bn" if scores.get("bn", 0) >= scores.get("en", 0) else "en"
+        model = _load_whisper(STT_MODELS[language])
+        segments, _ = model.transcribe(samples, language=language, beam_size=1, vad_filter=True,
+                                       initial_prompt="(*@\textit{[bn]}@*):" if language == "bn" else "Question:")
+        text = " ".join(segment.text.strip() for segment in segments).strip()
+    return text, language, audio_ms
+
+
+# ---- Text to speech -------------------------------------------------------------------------
+
+def _sentences(text: str):
+    parts = [part.strip() for part in re.split(r"(?<=[.!?(*@\textit{[bn]}@*)])\s+|\n+", text) if part.strip()]
+    return parts or [text]
+
+
+def synthesize(text: str, language: str) -> Tuple[bytes, int]:
+    """Returns (WAV bytes, length in ms)."""
+    import numpy as np
+    import torch
+
+    language = language if language in TTS_MODELS else "en"
+    spoken = speakable(text, language)
+    with _lock:
+        model, tokenizer = _load_voice(language)
+        rate = model.config.sampling_rate
+        pieces = []
+        for sentence in _sentences(spoken)[:12]:
+            inputs = tokenizer(sentence, return_tensors="pt")
+            if inputs["input_ids"].shape[-1] == 0:
+                continue  # nothing the voice can pronounce (for example only Latin letters for the Bangla voice)
+            with torch.no_grad():
+                waveform = model(**inputs).waveform[0].cpu().numpy()
+            pieces.extend([waveform, np.zeros(int(rate * 0.25), dtype=waveform.dtype)])
+    if not pieces:
+        raise ValueError("Nothing in this answer can be spoken.")
+    audio = np.concatenate(pieces)
+    pcm = (np.clip(audio, -1, 1) * 32767).astype("<i2")
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(pcm.tobytes())
+    return buffer.getvalue(), int(len(pcm) * 1000 / rate)
+\end{lstlisting}
+
+% =========================
+% 16) apps/voice-api/app/voice/routes.py
+% =========================
+\section*{\normalsize\nolinkurl{apps/voice-api/app/voice/routes.py}}
+
+\begin{lstlisting}[language=Python]
+@router.post("/sessions/{session_id}/listen")
+def listen(session_id: str, req: ListenRequest):
+    _active(req.institution_id, session_id)
+    try:
+        audio = base64.b64decode(req.audio_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="The recording is not valid base64.")
+    if len(audio) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="The recording is too large.")
+    try:
+        (text, language, audio_ms), took = speech.timed(speech.transcribe, audio, req.language_hint)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    except speech.SpeechUnavailable as err:
+        raise HTTPException(status_code=503, detail=str(err))
+    if not text:
+        raise HTTPException(status_code=422, detail="No speech was heard. Speak closer to the microphone and try again.")
+    try:
+        turn_id = store.add_turn(req.institution_id, session_id, "CALLER", text, language, audio_ms=audio_ms, processing_ms=took)
+    except Exception as err:
+        _store_errors(err)
+    return ok({"text": text, "language": language, "audio_ms": audio_ms, "processing_ms": took, "turn_id": turn_id})
+
+
+@router.post("/sessions/{session_id}/speak")
+def speak(session_id: str, req: SpeakRequest):
+    _active(req.institution_id, session_id)
+    try:
+        (wav, audio_ms), took = speech.timed(speech.synthesize, req.text, req.language)
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    except speech.SpeechUnavailable as err:
+        raise HTTPException(status_code=503, detail=str(err))
+    try:
+        turn_id = store.add_turn(req.institution_id, session_id, "ASSISTANT", req.text, req.language, req.question_id, audio_ms, took)
+    except Exception as err:
+        _store_errors(err)
+    return ok({"audio_base64": base64.b64encode(wav).decode(), "mime_type": "audio/wav", "audio_ms": audio_ms, "processing_ms": took, "turn_id": turn_id})
+\end{lstlisting}
+
+% =========================
+% 17) docker-compose.yml
+% =========================
+\section*{\normalsize\nolinkurl{docker-compose.yml}}
+
+\begin{lstlisting}[language=YAML]
+  voice-api:
+    build:
+      context: ./apps/voice-api
+      dockerfile: Dockerfile
+    container_name: erp-voice-api
+    restart: always
+    depends_on:
+      # Its tables live in the shared ERP database; the Core creates its login on start.
+      core-api:
+        condition: service_started
+      ollama:
+        condition: service_started
+    environment:
+      VOICE_PORT: 8050
+      NODE_ENV: production
+      SERVICE_SECRET_VOICE: ${SERVICE_SECRET_VOICE:-voice_service_internal_secret_key_8802}
+      ASSISTANT_LLM_PROVIDER: ollama
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      ASSISTANT_EMBED_PROVIDER: ollama
+      OLLAMA_EMBED_MODEL: bge-m3
+      # Call transcripts go to the shared ERP database as the RLS-limited voice_service login.
+      VOICE_DATABASE_URL: postgresql://voice_service:${VOICE_DB_PASSWORD:-change-me-voice}@erp-postgres:5432/erp_db
+      VOICE_STT_MODEL: ${VOICE_STT_MODEL:-small}
+      CORE_ERP_API_BASE: http://core-api:4000/api/v1
+    volumes:
+      - voice_models:/app/.cache/huggingface
+    ports:
+      - "8050:8050"
+
+  # The institution's own language model. Not published to the host: only voice-api uses it.
+  # With an NVIDIA GPU on the server, add a GPU reservation here for much faster answers.
+  ollama:
+    image: ollama/ollama:0.32.5
+    container_name: erp-ollama
+    restart: always
+    volumes:
+      - ollama_models:/root/.ollama
+
+  # Downloads the models once; later starts find them in the volume.
+  ollama-pull:
+    image: ollama/ollama:0.32.5
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "sleep 5 && ollama pull ${OLLAMA_MODEL:-qwen2.5:7b} && ollama pull bge-m3"]
+    restart: "no"
+
+volumes:
+\end{lstlisting}
+

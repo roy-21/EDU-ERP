@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { authService } from "@/lib/auth";
 import { portalApi } from "@/lib/identityServices";
 import { ProtectedImage } from "@/app/admin/hostel/_components/hostelViews";
+import AssistantChat from "@/components/assistant/AssistantChat";
+import VoiceCall from "@/components/assistant/VoiceCall";
 import { DataTable, ErrorBanner, StatusBadge, formatDateTime, friendlyError, money, primaryButton, secondaryButton, useData } from "@/components/erp/ui";
 
 // A guardian with no linked student gets 404s for bills and meals; that is shown as a message.
@@ -168,6 +170,14 @@ export default function StudentPortal() {
               <p className="text-xs text-slate-500">Hostel overdue</p>
               <p className="text-2xl font-bold text-red-600">{money(bills?.totalOverdue || 0)}</p>
             </div>
+          </section>
+        )}
+
+        {me?.modules?.includes("voice-ai") && (
+          <section className="space-y-2">
+            <h2 className="font-bold text-slate-800">Ask the assistant</h2>
+            <VoiceCall />
+            <AssistantChat compact />
           </section>
         )}
 

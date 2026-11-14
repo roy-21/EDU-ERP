@@ -5,6 +5,7 @@ import { validateEmailConfig } from "./modules/hostel/hostel-email.service";
 import { hasEncryptionKey } from "./modules/hostel/hostel-secrets";
 import { startHostelScheduler } from "./modules/hostel/hostel.scheduler";
 import { startInventoryScheduler } from "./modules/inventory/inventory-alerts.service";
+import { startAssistantScheduler } from "./modules/assistant/assistant.scheduler";
 
 async function bootstrap() {
   // Initialize Production PostgreSQL Database Connection
@@ -15,6 +16,7 @@ async function bootstrap() {
   if (postgresService.isLive()) {
     startHostelScheduler();
     startInventoryScheduler();
+    startAssistantScheduler();
     await validateEmailConfig();
     if (!hasEncryptionKey()) {
       console.warn("[Hostel Payment] HOSTEL_SECRET_KEY is not set. bKash credentials cannot be saved.");

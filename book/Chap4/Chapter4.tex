@@ -1,0 +1,73 @@
+\chapter{System Requirement}
+
+\section{Introduction}
+Identifying the requirements of a system before and during its development makes sure that the finished system can meet its goals and can be built, run and maintained with the available resources. For the proposed platform, the requirements come from two sources. The functional requirements, that is, what the system must do for its users, were presented in Chapter~III as the features of the proposed system: multi-institution registration, user and permission management, academic, financial, hostel, library, human resources, inventory and notice management, the student and guardian portal, the message and voice assistant, and the prediction service. The non-functional requirements follow from the nature of the data and the users: every record must be limited to its own institution, every request must be checked against the user's current role and permissions, passwords must be stored securely, and AI answers must come only from trusted sources.
+
+This chapter focuses on the resources needed to develop and operate the system. The hardware requirements are shaped mainly by the AI components, because the language model, the embedding model and the speech models run on the institution's own machine rather than on an external service. The software requirements list the operating environment, programming languages, frameworks, libraries, database, model runtime and tools used to build and run the four applications of the system: the Next.js frontend, the Core API, the AI service and the Voice service.
+
+\section{Hardware Requirements}
+The system was developed and tested on a single laptop that ran all four applications, the PostgreSQL database and the local AI models together. The specification of this machine therefore represents a configuration on which the complete system is known to run. The components that most affect performance are the processor and memory, which are used by the language model and the speech models, and the storage needed for the model files.
+
+\begin{itemize}
+    \item \textbf{Processor:}
+    An 11th Generation Intel Core i5-1135G7 processor at 2.40~GHz with 4 cores and 8 threads was used for development. The Core API, the AI service and the database have modest processing needs, but the language model and speech recognition run on the processor. The assistant is configured to use 8 processor threads for the language model and for speech processing. On this processor, an answer written by the qwen2.5:7b language model took about 40 to 80 seconds. A spoken English question answered from live records took about 20 seconds from the end of the recording to the spoken answer once the speech models were loaded, and a spoken turn whose answer was written by the language model took up to about 100 seconds.
+
+    \item \textbf{RAM:}
+    20~GB of memory was available on the development machine. Memory must hold the database, the Node.js and Python services and the AI models at the same time. The qwen2.5:7b language model alone is 4.7~GB, and the speech recognition and speech synthesis models are loaded into memory when they are first used.
+
+    \item \textbf{Storage:}
+    The development machine used a 477~GB NVMe solid-state drive together with a 932~GB hard disk. Besides the source code, the database and the uploaded documents, storage is needed for the AI model files: 4.7~GB for the qwen2.5:7b language model and about 3.7~GB for the downloaded speech models (faster-whisper small, medium and large-v3-turbo for speech recognition, and the MMS Bangla and English voices for speech synthesis). The bge-m3 embedding model needs a further 1.2~GB. In the container deployment, model files are kept in separate storage volumes so that they are downloaded only once.
+
+    \item \textbf{Graphics Processor:}
+    The development machine had an NVIDIA GeForce MX450 graphics card with 2~GB of memory and Intel Iris Xe integrated graphics. A graphics processor is optional. With only 2~GB of graphics memory, splitting the language model between the graphics card and the processor was about forty times slower than running on the processor alone, so the system is configured to run the model on the processor. On a server with a larger NVIDIA graphics processor, the language model can be given access to it for much faster answers.
+
+    \item \textbf{Input and Output Devices:}
+    A keyboard, mouse or touchpad and a display are needed to use the web interface. For the voice assistant, the user's device needs a microphone to record speech and speakers or headphones to play the spoken answer.
+
+    \item \textbf{Network:}
+    The four applications communicate over HTTP, so they need a network connection when they run on separate machines; on a single machine they communicate locally. Users reach the system through a web browser over the institution's network or the internet. An internet connection is needed to download the AI models the first time, to send email through an SMTP server, and to use SMS, call or online payment providers when an institution configures them.
+\end{itemize}
+
+\section{Software Requirements}
+The system is made of applications written in two languages and run either directly on the developer's machine or as containers. The software below is required to build and run it.
+
+\begin{itemize}
+    \item \textbf{Operating System:}
+    The system was developed on Windows 11 Pro. In the container deployment, the Core API runs on a Node.js 20 Alpine Linux image and the AI and Voice services run on Python 3.11 slim Linux images, so the services can be hosted on any operating system that runs Docker.
+
+    \item \textbf{Programming Language:}
+    JavaScript is used for the frontend, and TypeScript~5.6 for the Core API, which runs on Node.js (version 20 in the container image; version 24 was used during development). Python~3.11 is used for the AI service and the Voice service; the Voice service needs Python~3.11 because the speech libraries it depends on are not available for newer Python versions. SQL is used for the database schema and queries.
+
+    \item \textbf{Frontend Framework and Libraries:}
+    Next.js~16.2 with the App Router, React~19.2 with the React Compiler, Tailwind CSS~4 for styling, Zustand~5 for client-side state and Lucide React for icons. ESLint~9 is used to check code quality.
+
+    \item \textbf{Backend Framework and Libraries:}
+    The Core API uses Express~4.21 as its web framework, the pg driver for PostgreSQL, jsonwebtoken for JSON Web Tokens, bcryptjs for password hashing, Nodemailer for sending email through SMTP, PDFKit for generating PDF receipts, the cors middleware, uuid for identifiers and dotenv for configuration. The tsx tool runs the TypeScript code during development, and the TypeScript compiler builds it for production.
+
+    \item \textbf{AI and Machine Learning Libraries:}
+    The AI service uses FastAPI as its web framework with Uvicorn as the server and Pydantic~2 for request validation, scikit-learn for the Random Forest and ridge regression models, and NumPy and pandas for numerical data. The Voice service also uses FastAPI and Uvicorn, together with pypdf and python-docx to read text from uploaded PDF and Word documents and psycopg~3 to store call transcripts in PostgreSQL.
+
+    \item \textbf{Language Model Runtime:}
+    Ollama (version 0.32.5) runs the institution's own models: qwen2.5:7b as the language model that writes the assistant's answers, and bge-m3 as the embedding model used to search documents and approved answers by meaning.
+
+    \item \textbf{Speech Processing:}
+    faster-whisper for speech-to-text, using the small model for English and for detecting the spoken language and the large-v3-turbo model for Bangla; Hugging Face Transformers with PyTorch (the processor-only build) for text-to-speech with the MMS voices facebook/mms-tts-ben and facebook/mms-tts-eng.
+
+    \item \textbf{Database System:}
+    PostgreSQL~16 stores all institutional data in one database with 119 tables. The Core API connects to it with full access, while the Voice service connects through a separate restricted login, voice\_service, whose access to the call transcript tables is limited by row security policies.
+
+    \item \textbf{API:}
+    The applications communicate through REST APIs that exchange JSON over HTTP. The Core API exposes its endpoints under /api/v1 and requires a Bearer JSON Web Token on every protected request. The AI service and the Voice service expose their own REST APIs, which the Core API calls with a shared service token sent in the X-Service-Token header. The Core API also uses an SMTP server for email, and it can be connected to SMS and call providers and to a bKash payment gateway for online hostel payments.
+
+    \item \textbf{Deployment Tools:}
+    Docker and Docker Compose package and run the database, the Core API, the AI service, the Voice service and Ollama as containers, with health checks so that the Core API starts only after the database is ready, and with a one-time container that downloads the language and embedding models.
+
+    \item \textbf{Testing Tools:}
+    The built-in Node.js test runner is used for the Core API tests, and pytest for the AI service and Voice service tests.
+
+    \item \textbf{Web Browser:}
+    A modern web browser is needed to use the system. For voice calls, the browser must be allowed to use the microphone.
+\end{itemize}
+
+\section{Summary}
+This chapter described the requirements for developing and operating the proposed system. It noted that the functional requirements are the features described in Chapter~III and that the main non-functional requirements are data separation between institutions, permission checks on every request, secure password storage and trustworthy AI answers. It then presented the hardware on which the complete system was developed and run, an Intel Core i5 processor with 20~GB of memory and solid-state storage, and explained how the locally hosted language and speech models determine the processor, memory and storage needs. Finally, it listed the software required: JavaScript, TypeScript, Python and SQL, Next.js and React for the frontend, Express for the Core API, FastAPI and scikit-learn for the AI service, Ollama, faster-whisper and MMS for language and speech processing, PostgreSQL~16 as the database, REST APIs for communication, and Docker Compose for deployment. These requirements form the basis for the methodology and design presented in the following chapters.

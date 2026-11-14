@@ -1,0 +1,98 @@
+erDiagram
+  erp_tenants ||--|| ai_settings : "configures"
+  erp_tenants ||--o{ ai_documents : "uploads"
+  erp_tenants ||--o{ ai_contacts : "names"
+  erp_tenants ||--o{ ai_questions : "receives"
+  ai_documents ||--o{ ai_chunks : "split into"
+  ai_knowledge ||--o{ ai_chunks : "indexed as"
+  ai_questions ||--o| ai_escalations : "forwarded as"
+  ai_contacts ||--o{ ai_escalations : "handles"
+  ai_questions ||--o{ ai_reviews : "reviewed in"
+  ai_escalations ||--o| ai_reviews : "answer reviewed"
+  ai_reviews |o--o| ai_knowledge : "approved into"
+  ai_questions |o--o{ ai_knowledge : "source of"
+  erp_tenants ||--o{ voice_sessions : "has"
+  voice_sessions ||--o{ voice_turns : "contains"
+
+  ai_settings {
+    string institution_id PK
+    string timezone
+    numeric min_confidence
+    string admin_email
+  }
+  ai_documents {
+    string id PK
+    string title
+    string file_name
+    string status
+    int chunk_count
+    int embedded_chunks
+  }
+  ai_chunks {
+    string id PK
+    string document_id FK
+    string knowledge_id FK
+    int position
+    text content
+    real_array embedding
+  }
+  ai_contacts {
+    string id PK
+    string name
+    string phone
+    string email
+    text_array topics
+    text_array channels
+    boolean is_default
+  }
+  ai_questions {
+    string id PK
+    string asked_by
+    text question
+    string language
+    string kind
+    string status
+    text answer
+    string mode
+    numeric confidence
+  }
+  ai_escalations {
+    string id PK
+    string question_id FK
+    string contact_id FK
+    string status
+    int attempts
+    timestamp token_expires_at
+    text answer
+  }
+  ai_reviews {
+    string id PK
+    string question_id FK
+    string escalation_id FK
+    text received_answer
+    text ai_draft
+    text final_answer
+    string status
+  }
+  ai_knowledge {
+    string id PK
+    text question
+    text answer
+    string source_question_id FK
+    string status
+  }
+  voice_sessions {
+    string id PK
+    string user_id
+    string channel
+    string status
+    int turns
+  }
+  voice_turns {
+    string id PK
+    string session_id FK
+    string speaker
+    text text
+    int audio_ms
+    int processing_ms
+  }

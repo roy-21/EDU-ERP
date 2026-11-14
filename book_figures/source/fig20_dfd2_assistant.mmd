@@ -1,0 +1,49 @@
+flowchart TB
+  U["User (text or voice)"]
+  AD["Institution Admin"]
+  RP["Responsible person"]
+  V["Voice API and Ollama"]
+  P91(("9.1<br/>Detect language<br/>and intent"))
+  P92(("9.2<br/>Answer from<br/>own records"))
+  P93(("9.3<br/>Retrieve and<br/>rank knowledge"))
+  P94(("9.4<br/>Write grounded<br/>answer"))
+  P95(("9.5<br/>Forward<br/>question"))
+  P96(("9.6<br/>Review and<br/>approve"))
+  P97(("9.7<br/>Ingest<br/>documents"))
+  P98(("9.8<br/>Speech to text,<br/>text to speech"))
+  DA[("D3-D5 Attendance, results,<br/>fees, meals, applications")]
+  DQ[("D7.1 ai_questions")]
+  DC[("D7.2 ai_chunks")]
+  DD[("D7.3 ai_documents")]
+  DE[("D7.4 ai_escalations,<br/>ai_contacts")]
+  DR[("D7.5 ai_reviews,<br/>ai_knowledge")]
+  DV[("D8 voice_sessions,<br/>voice_turns")]
+  U -->|"audio"| P98
+  P98 -->|"text"| P91
+  P98 --> DV
+  P98 <--> V
+  U -->|"typed question"| P91
+  P91 -->|"action: refusal"| DQ
+  P91 -->|"live data"| P92
+  P92 <--> DA
+  P92 -->|"answer"| DQ
+  P91 -->|"knowledge"| P93
+  P93 <--> DC
+  P93 -->|"passages"| P94
+  P94 <--> V
+  P94 -->|"answer and sources"| DQ
+  P93 -->|"no trusted answer"| P95
+  P94 -->|"not answerable"| P95
+  P95 <--> DE
+  P95 -->|"question and reply link"| RP
+  RP -->|"answer"| P95
+  P95 -->|"reply and AI draft"| DR
+  AD <-->|"decision"| P96
+  P96 <--> DR
+  P96 -->|"approved answer indexed"| DC
+  P96 -->|"answered later"| DQ
+  AD -->|"upload"| P97
+  P97 <--> DD
+  P97 <-->|"extract, embed"| V
+  P97 --> DC
+  DQ -->|"answer"| U

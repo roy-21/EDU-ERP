@@ -1,0 +1,29 @@
+flowchart LR
+  subgraph R["Built-in system roles"]
+    SA["Super Admin<br/><i>all permissions + tenants, subscriptions</i>"]
+    AD["Institution Admin<br/><i>all permissions in its institution</i>"]
+    HW["Hostel Warden"]
+    AC["Accountant"]
+    ST["Storekeeper"]
+    SF["Staff"]
+    TE["Teacher"]
+    SU["Student"]
+    GU["Guardian"]
+    NS["Not System User<br/><i>record only, cannot sign in</i>"]
+  end
+  CR["Custom roles<br/><i>created by the institution,<br/>with chosen permission keys</i>"]
+  ADMIN["Admin panel<br/>/admin"]
+  STAFF["Staff view of admin panel<br/>/admin (permitted modules only)"]
+  PORTAL["Student / Guardian portal<br/>/portal"]
+  SA --> ADMIN
+  AD --> ADMIN
+  HW --> STAFF
+  AC --> STAFF
+  ST --> STAFF
+  SF --> STAFF
+  TE --> STAFF
+  CR --> STAFF
+  SU --> PORTAL
+  GU --> PORTAL
+  classDef off fill:#f3f4f6,stroke:#9ca3af,color:#6b7280;
+  class NS off;

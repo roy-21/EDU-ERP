@@ -1,0 +1,27 @@
+flowchart TB
+  S(("Start")) --> A1
+  subgraph L1["Institution Admin"]
+    A1["Create exams for the session<br/>with weights and maximum marks"]
+  end
+  subgraph L2["Teacher"]
+    T1["Open own class and<br/>an exam assessment"] --> T2["Enter marks,<br/>mark absent students"]
+    T2 --> T3["Lock the assessment"]
+    T4["Unlock to correct marks"] -.-> T2
+  end
+  subgraph L3["Core API"]
+    C1["Combine weighted assessments<br/>into a percentage per student"] --> C2["Apply grading configuration:<br/>letter grade, grade point, pass or fail"]
+  end
+  subgraph L5["Institution Admin"]
+    A6{"Exam weights total 100%<br/>and all marks locked?"}
+    A6 -->|yes| A8["Publish class results"]
+    A6 -->|no| A7["Publishing refused<br/>with the reason"]
+    A8 -.-> A9["Withdraw results if needed"]
+  end
+  subgraph L4["Student / Guardian"]
+    P1["See results term by term with<br/>credit-weighted GPA in the portal"] --> E(("End"))
+  end
+  A1 --> T1
+  T3 --> C1
+  C2 --> A6
+  A7 -.-> T4
+  A8 --> P1

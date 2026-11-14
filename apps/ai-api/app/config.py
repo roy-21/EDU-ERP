@@ -1,4 +1,14 @@
 import os
+from pathlib import Path
+
+# Local settings come from apps/ai-api/.env (never committed); real environment variables win.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
+except ImportError:  # python-dotenv is optional where the environment is set directly
+    pass
+
 
 class Settings:
     PORT: int = int(os.getenv("AI_PORT", "8000"))
@@ -7,4 +17,3 @@ class Settings:
     ENVIRONMENT: str = os.getenv("NODE_ENV", "development")
 
 settings = Settings()
-

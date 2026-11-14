@@ -81,8 +81,13 @@ services:
       PORT: 4000
       ERP_DATABASE_URL: postgresql://erp_user:erp_secret@erp-postgres:5432/erp_db
       JWT_SECRET: super_secret_jwt_access_key_change_in_production_32char
-      SERVICE_SECRET_AI: ai_service_internal_secret_key_9901
-      SERVICE_SECRET_VOICE: voice_service_internal_secret_key_8802
+      SERVICE_SECRET_AI: ${SERVICE_SECRET_AI:-ai_service_internal_secret_key_9901}
+      SERVICE_SECRET_VOICE: ${SERVICE_SECRET_VOICE:-voice_service_internal_secret_key_8802}
+      # Every request reaches the Core first; it sends message and voice work to voice-api
+      # and other AI work (predictions) to ai-api.
+      AI_API_URL: http://ai-api:8000/api/v1
+      VOICE_API_URL: http://voice-api:8050/api/v1
+      VOICE_DB_PASSWORD: ${VOICE_DB_PASSWORD:-change-me-voice}
     ports:
       - "4000:4000"
 
@@ -100,13 +105,15 @@ services:
         condition: service_started
     environment:
       AI_PORT: 8000
+      NODE_ENV: production
+      SERVICE_SECRET_AI: ${SERVICE_SECRET_AI:-ai_service_internal_secret_key_9901}
       AI_DATABASE_URL: postgresql://ai_user:ai_secret@ai-postgres:5432/ai_db
       REDIS_URL: redis://redis:6379/0
       CORE_ERP_API_URL: http://core-api:4000/api/v1
     ports:
       - "8000:8000"
 
-  # Voice Assistant Backend Service
+  # Voice & Message Assistant Backend (module 32): message assistant, website voice calls (speech).
   voice-api:
     build:
       context: ./apps/voice-api
@@ -114,16 +121,52 @@ services:
     container_name: erp-voice-api
     restart: always
     depends_on:
-      voice-postgres:
-        condition: service_healthy
+      # Its tables live in the shared ERP database; the Core creates its login on start.
+      core-api:
+        condition: service_started
+      ollama:
+        condition: service_started
     environment:
       VOICE_PORT: 8050
-      VOICE_DATABASE_URL: postgresql://voice_user:voice_secret@voice-postgres:5432/voice_db
+      NODE_ENV: production
+      SERVICE_SECRET_VOICE: ${SERVICE_SECRET_VOICE:-voice_service_internal_secret_key_8802}
+      ASSISTANT_LLM_PROVIDER: ollama
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      ASSISTANT_EMBED_PROVIDER: ollama
+      OLLAMA_EMBED_MODEL: bge-m3
+      # Call transcripts go to the shared ERP database as the RLS-limited voice_service login.
+      VOICE_DATABASE_URL: postgresql://voice_service:${VOICE_DB_PASSWORD:-change-me-voice}@erp-postgres:5432/erp_db
+      VOICE_STT_MODEL: ${VOICE_STT_MODEL:-small}
       CORE_ERP_API_BASE: http://core-api:4000/api/v1
+    volumes:
+      - voice_models:/app/.cache/huggingface
     ports:
       - "8050:8050"
 
+  # The institution's own language model. Not published to the host: only voice-api uses it.
+  # With an NVIDIA GPU on the server, add a GPU reservation here for much faster answers.
+  ollama:
+    image: ollama/ollama:0.32.5
+    container_name: erp-ollama
+    restart: always
+    volumes:
+      - ollama_models:/root/.ollama
+
+  # Downloads the models once; later starts find them in the volume.
+  ollama-pull:
+    image: ollama/ollama:0.32.5
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "sleep 5 && ollama pull ${OLLAMA_MODEL:-qwen2.5:7b} && ollama pull bge-m3"]
+    restart: "no"
+
 volumes:
+  voice_models:
+  ollama_models:
   erp_pgdata:
   ai_pgdata:
   voice_pgdata:

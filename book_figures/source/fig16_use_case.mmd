@@ -1,0 +1,54 @@
+flowchart LR
+  SA["Super Admin"]
+  AD["Institution Admin"]
+  AC["Accountant"]
+  HW["Hostel Warden"]
+  SK["Storekeeper"]
+  TE["Teacher"]
+  ST["Student"]
+  GU["Guardian"]
+  RP["Responsible person"]
+  subgraph SYS["System boundary"]
+    direction TB
+    UC1(["Approve registrations, manage<br/>institutions, modules and billing"])
+    UC2(["Manage users, roles,<br/>permissions and settings"])
+    UC3(["Manage academic structure,<br/>students, teachers, guardians"])
+    UC6(["Publish results"])
+    UC10(["Publish notices"])
+    UC11(["Upload documents and<br/>review assistant answers"])
+    UC7(["Manage fee invoices<br/>and payments"])
+    UC8(["Manage hostel rooms, allocations,<br/>rent, meals and visitors"])
+    UC9(["Manage stock, transfers,<br/>assets and kitchen"])
+    UC17(["Request store items"])
+    UC4(["Take attendance"])
+    UC5(["Enter and lock marks"])
+    UC16(["View own leave and payslips,<br/>request leave"])
+    UC14(["Ask the assistant<br/>(text or voice)"])
+    UC12(["View own records in the portal"])
+    UC13(["Pay hostel invoice online,<br/>book meals"])
+    UC15(["Answer a forwarded question"])
+  end
+  SA --- UC1
+  AD --- UC2
+  AD --- UC3
+  AD --- UC6
+  AD --- UC10
+  AD --- UC11
+  AC --- UC7
+  AC --- UC8
+  HW --- UC8
+  SK --- UC9
+  SK --- UC17
+  TE --- UC17
+  TE --- UC4
+  TE --- UC5
+  TE --- UC16
+  TE --- UC14
+  ST --- UC14
+  ST --- UC12
+  ST --- UC13
+  GU --- UC14
+  GU --- UC12
+  RP --- UC15
+  classDef actor fill:#ffffff,stroke:#111827,stroke-width:2px,font-weight:bold;
+  class SA,AD,TE,AC,HW,SK,ST,GU,RP actor;

@@ -2047,3 +2047,214 @@ CREATE TABLE IF NOT EXISTS inv_meal_counts (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     PRIMARY KEY (store_id, day, meal)
 );
+
+-- ---------------------------------------------------------------------------------
+-- AI knowledge and support assistant. Every row belongs to one institution and every
+-- query filters by it. The assistant only learns from documents an admin uploaded and
+-- answers an admin approved; it reads ERP data through a read-only connection.
+-- ---------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ai_settings (
+    institution_id VARCHAR(64) PRIMARY KEY REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    timezone VARCHAR(60) NOT NULL DEFAULT 'Asia/Dhaka',
+    min_confidence NUMERIC(4,3) NOT NULL DEFAULT 0.6 CHECK (min_confidence > 0 AND min_confidence <= 1),
+    admin_email VARCHAR(255) NOT NULL DEFAULT '',
+    updated_by VARCHAR(255) NOT NULL DEFAULT '',
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS ai_documents (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    title VARCHAR(200) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(120) NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+    content BYTEA NOT NULL,
+    status VARCHAR(12) NOT NULL DEFAULT 'QUEUED' CHECK (status IN ('QUEUED', 'PROCESSING', 'READY', 'FAILED')),
+    error VARCHAR(1000) NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    char_count INTEGER NOT NULL DEFAULT 0,
+    embedded_chunks INTEGER NOT NULL DEFAULT 0,
+    uploaded_by VARCHAR(255) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    processed_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS ai_documents_tenant ON ai_documents (institution_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ai_documents_queue ON ai_documents (next_attempt_at) WHERE status IN ('QUEUED', 'PROCESSING');
+
+CREATE TABLE IF NOT EXISTS ai_contacts (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    name VARCHAR(150) NOT NULL,
+    title VARCHAR(150) NOT NULL DEFAULT '',
+    phone VARCHAR(30) NOT NULL DEFAULT '',
+    email VARCHAR(255) NOT NULL DEFAULT '',
+    user_id VARCHAR(64),
+    topics TEXT[] NOT NULL DEFAULT '{}',
+    channels TEXT[] NOT NULL DEFAULT '{SMS,EMAIL}',
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ai_contacts_tenant ON ai_contacts (institution_id);
+
+CREATE TABLE IF NOT EXISTS ai_questions (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    asked_by VARCHAR(64) NOT NULL,
+    asker_name VARCHAR(150) NOT NULL DEFAULT '',
+    asker_role VARCHAR(50) NOT NULL DEFAULT '',
+    question VARCHAR(1000) NOT NULL,
+    language VARCHAR(2) NOT NULL DEFAULT 'en',
+    kind VARCHAR(12) NOT NULL CHECK (kind IN ('KNOWLEDGE', 'LIVE_DATA', 'ACTION')),
+    topic VARCHAR(40) NOT NULL DEFAULT '',
+    status VARCHAR(16) NOT NULL CHECK (status IN ('ANSWERED', 'ESCALATED', 'REFUSED', 'NO_DATA', 'ANSWERED_LATER')),
+    answer TEXT NOT NULL DEFAULT '',
+    answer_source VARCHAR(12) NOT NULL DEFAULT '',
+    mode VARCHAR(12) NOT NULL DEFAULT '',
+    confidence NUMERIC(4,3),
+    sources JSONB NOT NULL DEFAULT '[]',
+    feedback VARCHAR(12) CHECK (feedback IN ('HELPFUL', 'NOT_HELPFUL')),
+    feedback_note VARCHAR(500) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    answered_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS ai_questions_tenant ON ai_questions (institution_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ai_questions_asker ON ai_questions (institution_id, asked_by, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_escalations (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    question_id VARCHAR(64) NOT NULL UNIQUE REFERENCES ai_questions(id) ON DELETE CASCADE,
+    contact_id VARCHAR(64) REFERENCES ai_contacts(id) ON DELETE SET NULL,
+    contact_name VARCHAR(150) NOT NULL DEFAULT '',
+    status VARCHAR(14) NOT NULL CHECK (status IN ('WAITING_ADMIN', 'SENDING', 'SENT', 'FAILED', 'ANSWERED', 'CLOSED')),
+    sms_status VARCHAR(16) NOT NULL DEFAULT 'NOT_USED',
+    email_status VARCHAR(16) NOT NULL DEFAULT 'NOT_USED',
+    call_status VARCHAR(16) NOT NULL DEFAULT 'NOT_USED',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMP WITH TIME ZONE,
+    last_error VARCHAR(1000) NOT NULL DEFAULT '',
+    reply_nonce VARCHAR(64) NOT NULL DEFAULT '',
+    reply_token_hash VARCHAR(64) UNIQUE,
+    token_expires_at TIMESTAMP WITH TIME ZONE,
+    answer TEXT NOT NULL DEFAULT '',
+    answered_by VARCHAR(150) NOT NULL DEFAULT '',
+    answered_via VARCHAR(10) NOT NULL DEFAULT '',
+    answered_at TIMESTAMP WITH TIME ZONE,
+    closed_note VARCHAR(500) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+ALTER TABLE ai_escalations ADD COLUMN IF NOT EXISTS reply_nonce VARCHAR(64) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS ai_escalations_tenant ON ai_escalations (institution_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ai_escalations_retry ON ai_escalations (next_attempt_at) WHERE status IN ('SENDING', 'FAILED');
+
+CREATE TABLE IF NOT EXISTS ai_knowledge (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    question VARCHAR(1000) NOT NULL,
+    answer TEXT NOT NULL,
+    explanation TEXT NOT NULL DEFAULT '',
+    source_question_id VARCHAR(64) REFERENCES ai_questions(id) ON DELETE SET NULL,
+    status VARCHAR(10) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'RETIRED')),
+    approved_by VARCHAR(255) NOT NULL,
+    approved_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    retired_by VARCHAR(255) NOT NULL DEFAULT '',
+    retired_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS ai_knowledge_tenant ON ai_knowledge (institution_id, approved_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_reviews (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    question_id VARCHAR(64) NOT NULL REFERENCES ai_questions(id) ON DELETE CASCADE,
+    escalation_id VARCHAR(64) UNIQUE REFERENCES ai_escalations(id) ON DELETE CASCADE,
+    question VARCHAR(1000) NOT NULL,
+    received_answer TEXT NOT NULL,
+    answered_by VARCHAR(150) NOT NULL DEFAULT '',
+    ai_draft TEXT NOT NULL DEFAULT '',
+    final_answer TEXT NOT NULL DEFAULT '',
+    explanation TEXT NOT NULL DEFAULT '',
+    status VARCHAR(10) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED')),
+    reviewed_by VARCHAR(255) NOT NULL DEFAULT '',
+    reviewed_at TIMESTAMP WITH TIME ZONE,
+    review_note VARCHAR(500) NOT NULL DEFAULT '',
+    knowledge_id VARCHAR(64) REFERENCES ai_knowledge(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS ai_reviews_tenant ON ai_reviews (institution_id, status, created_at DESC);
+
+-- Searchable pieces of trusted knowledge: chunks of uploaded documents and approved answers.
+-- terms holds the chunk's normalised words for indexed search in any script, Bangla included;
+-- embedding is filled only when an embedding provider is configured.
+CREATE TABLE IF NOT EXISTS ai_chunks (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    document_id VARCHAR(64) REFERENCES ai_documents(id) ON DELETE CASCADE,
+    knowledge_id VARCHAR(64) REFERENCES ai_knowledge(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    content TEXT NOT NULL,
+    terms TEXT[] NOT NULL DEFAULT '{}',
+    embedding REAL[],
+    embedding_model VARCHAR(80) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    CHECK ((document_id IS NULL) <> (knowledge_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS ai_chunks_tenant ON ai_chunks (institution_id);
+CREATE INDEX IF NOT EXISTS ai_chunks_terms ON ai_chunks USING GIN (terms);
+CREATE INDEX IF NOT EXISTS ai_chunks_document ON ai_chunks (document_id);
+CREATE INDEX IF NOT EXISTS ai_chunks_knowledge ON ai_chunks (knowledge_id);
+
+-- ---------------------------------------------------------------------------------
+-- Voice & Message Assistant: call sessions and transcripts. The Voice & Message Assistant
+-- Backend (voice-api) writes these directly through its own database role, voice_service.
+-- Row Level Security limits that role to the one institution named in app.institution_id,
+-- which it sets per transaction, so even a bug in voice-api cannot touch another tenant.
+-- The Core ERP (table owner) is not limited by the policy and reads them for the panel.
+-- ---------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS voice_sessions (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    user_id VARCHAR(64) NOT NULL,
+    user_name VARCHAR(150) NOT NULL DEFAULT '',
+    channel VARCHAR(10) NOT NULL DEFAULT 'WEB' CHECK (channel IN ('WEB', 'PHONE')),
+    status VARCHAR(12) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'ENDED')),
+    language VARCHAR(2) NOT NULL DEFAULT '',
+    turns INTEGER NOT NULL DEFAULT 0,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    ended_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS voice_sessions_tenant ON voice_sessions (institution_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS voice_sessions_user ON voice_sessions (institution_id, user_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS voice_turns (
+    id VARCHAR(64) PRIMARY KEY,
+    institution_id VARCHAR(64) NOT NULL REFERENCES erp_tenants(id) ON DELETE CASCADE,
+    session_id VARCHAR(64) NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+    speaker VARCHAR(10) NOT NULL CHECK (speaker IN ('CALLER', 'ASSISTANT')),
+    text TEXT NOT NULL,
+    language VARCHAR(2) NOT NULL DEFAULT '',
+    question_id VARCHAR(64),
+    audio_ms INTEGER NOT NULL DEFAULT 0,
+    processing_ms INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS voice_turns_session ON voice_turns (session_id, created_at);
+
+ALTER TABLE voice_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE voice_turns ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS voice_sessions_tenant ON voice_sessions;
+CREATE POLICY voice_sessions_tenant ON voice_sessions
+    USING (institution_id = current_setting('app.institution_id', true))
+    WITH CHECK (institution_id = current_setting('app.institution_id', true));
+DROP POLICY IF EXISTS voice_turns_tenant ON voice_turns;
+CREATE POLICY voice_turns_tenant ON voice_turns
+    USING (institution_id = current_setting('app.institution_id', true))
+    WITH CHECK (institution_id = current_setting('app.institution_id', true));
+
+-- Whether a question was typed or spoken in a voice call.
+ALTER TABLE ai_questions ADD COLUMN IF NOT EXISTS channel VARCHAR(10) NOT NULL DEFAULT 'TEXT';

@@ -1,0 +1,14 @@
+flowchart LR
+  subgraph IN1["Risk prediction input"]
+    F1["attendance rate<br/>midterm average<br/>assignment submission rate<br/>previous CGPA<br/>fee overdue days"]
+  end
+  subgraph IN2["GPA forecast input"]
+    F2["current CGPA<br/>term credits<br/>quiz average<br/>midterm"]
+  end
+  C["Core API gateway<br/>/api/v1/ai/predict/..."]
+  F1 --> C
+  F2 --> C
+  C -->|"X-Service-Token"| RF["AI API<br/><b>Random Forest classifier</b><br/>100 trees, max depth 6<br/>(trained at start-up on 1,000<br/>synthetic records)"]
+  C -->|"X-Service-Token"| RG["AI API<br/><b>Ridge regression</b><br/>(trained at start-up on 800<br/>synthetic records)<br/>predicts term GPA, recomputes CGPA"]
+  RF --> O1["risk probability<br/>level: LOW · MEDIUM (≥0.25) · HIGH (≥0.50) · CRITICAL (≥0.75)<br/>risk factors + recommendations"]
+  RG --> O2["projected CGPA (0–4)<br/>range ±0.15<br/>trend: upward · stable · downward"]

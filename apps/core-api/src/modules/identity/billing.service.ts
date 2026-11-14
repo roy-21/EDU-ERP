@@ -86,11 +86,15 @@ export const generateSubscriptionInvoices = async (options: { today?: string; te
           amount: Math.round(toMoney(line.monthly_price) * factor * 100) / 100,
         }));
         const amount = Math.round(items.reduce((sum: number, item: any) => sum + item.amount * 100, 0)) / 100;
+        // Due ten days after the invoice is raised. On the scheduled run that is the period's first
+        // day; an invoice raised later (billing turned on mid-month, or catching up after downtime)
+        // still gets its ten days instead of being overdue the moment it is created.
+        const dueDate = addDays(start > today ? start : today, DUE_AFTER_DAYS);
         const result = await postgresService.query(
           `INSERT INTO erp_subscription_invoices (id, tenant_id, invoice_number, period_start, period_end, billing_cycle, lines, amount, due_date)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (tenant_id, period_start) DO NOTHING`,
           [newId(), tenant.id, `SUB-${start.slice(0, 7).replace("-", "")}-${tenant.code}`, start, end, months === 12 ? "YEARLY" : "MONTHLY",
-            JSON.stringify(items), amount, addDays(start, DUE_AFTER_DAYS)]
+            JSON.stringify(items), amount, dueDate]
         );
         created += result.rowCount || 0;
         start = addDays(end, 1);

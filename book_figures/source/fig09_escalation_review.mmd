@@ -1,0 +1,18 @@
+flowchart TB
+  E0["Question could not be answered"] --> PICK{"Responsible person<br/>whose topics match the question,<br/>else the default person"}
+  PICK -->|"none set"| WA["Escalation: WAITING_ADMIN"]
+  PICK -->|found| SEND["Escalation: SENDING<br/>send on each chosen channel"]
+  SEND --> CH["SMS · Email · Call · Panel<br/>(with a private reply link valid 14 days)"]
+  CH -->|"reached"| SENT["Escalation: SENT"]
+  CH -->|"failed"| RETRY["Escalation: FAILED<br/>retried with growing delay,<br/>up to 5 attempts"]
+  RETRY --> SEND
+  RETRY -->|"attempts used up"| WA
+  SENT --> REPLY["Person answers<br/>via private link or their panel<br/>(or an admin records a phone answer)"]
+  WA --> REPLY
+  REPLY --> ANSW["Escalation: ANSWERED"]
+  ANSW --> REV[("ai_reviews: PENDING<br/>received answer + AI draft<br/>(Voice API /draft)")]
+  REV --> ADM{"Admin review"}
+  ADM -->|approve| KN[("ai_knowledge (approved)<br/>indexed into ai_chunks")]
+  KN --> QA["ai_questions: ANSWERED_LATER<br/>source: HUMAN · mode: REVIEWED"]
+  ADM -->|reject| RJ["Review: REJECTED<br/>not used by the assistant"]
+  KN --> NEXT["Future similar questions are<br/>answered from this knowledge"]

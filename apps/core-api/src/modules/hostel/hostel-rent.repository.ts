@@ -38,15 +38,40 @@ const settingsFromRow = (row: any) => ({
   updatedAt: toIso(row.updated_at),
 });
 
+// The row a new institution gets from the column defaults in schema.sql, for read-only callers
+// (the assistant's live answers) that may not create it. A test keeps the two in step.
+const DEFAULT_SETTINGS_ROW = {
+  default_due_day: 10,
+  timezone: "Asia/Dhaka",
+  reminder_days_before: [7, 3, 1],
+  remind_on_due_date: true,
+  overdue_first_after_days: 1,
+  overdue_interval_days: 3,
+  reminder_hour: 9,
+  channels: ["IN_APP", "EMAIL", "SMS"],
+  payment_instructions: "",
+  brand_name: "Hostel Office",
+  allow_partial_online: false,
+  contact_info: "",
+  hostel_rules: "",
+  meal_reminder_threshold: "500.00",
+  meal_reminder_interval_days: 3,
+  meal_payment_days: 7,
+  late_fee_type: "NONE",
+  late_fee_value: "0.00",
+  late_fee_grace_days: 0,
+  late_fee_starts_on: null,
+  updated_at: null,
+};
+
 export const getRentSettings = async (institutionId: string) => {
-  await postgresService.query(
-    "INSERT INTO hostel_rent_settings (institution_id) VALUES ($1) ON CONFLICT DO NOTHING",
-    [institutionId]
-  );
-  const { rows } = await postgresService.query(
-    "SELECT * FROM hostel_rent_settings WHERE institution_id = $1",
-    [institutionId]
-  );
+  const read = () => postgresService.query("SELECT * FROM hostel_rent_settings WHERE institution_id = $1", [institutionId]);
+  let { rows } = await read();
+  if (!rows[0]) {
+    if (postgresService.isReadOnly()) return settingsFromRow({ institution_id: institutionId, ...DEFAULT_SETTINGS_ROW });
+    await postgresService.query("INSERT INTO hostel_rent_settings (institution_id) VALUES ($1) ON CONFLICT DO NOTHING", [institutionId]);
+    ({ rows } = await read());
+  }
   return settingsFromRow(rows[0]);
 };
 

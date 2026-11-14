@@ -1,0 +1,25 @@
+flowchart TB
+  A["Institution registers online<br/>chooses modules · billing cycle · gets price quote"] --> B{"Super Admin<br/>reviews registration"}
+  B -->|reject| BX["Registration rejected"]
+  B -->|approve| C["Institution becomes active<br/>admin account created, credentials emailed"]
+  C --> D["Institution Admin signs in<br/>and changes the temporary password"]
+  D --> E["Configure the institution<br/>academic structure · roles and permissions ·<br/>grading · fee structure · hostel · settings"]
+  E --> F["Create users for teachers, staff,<br/>students and guardians<br/>(temporary passwords emailed)"]
+  F --> G["Daily operations by role"]
+  G --> G1["Teacher: attendance, marks"]
+  G --> G2["Accountant: invoices, payments"]
+  G --> G3["Warden: rooms, rent, meals, visitors"]
+  G --> G4["Storekeeper: stock, assets, kitchen"]
+  G --> G5["Admin: results, notices, HR, library"]
+  G1 & G2 & G3 & G4 & G5 --> DB[("Central PostgreSQL database")]
+  SCH["Background schedulers<br/>rent invoices · reminders · subscription billing ·<br/>payment reconciliation · inventory alerts ·<br/>document processing · escalation retries"] <--> DB
+  DB --> P["Students and guardians use the portal<br/>results · attendance · fees · notices · library · meals"]
+  DB --> Q["Users ask the assistant (text or voice)"]
+  Q --> R{"Trusted answer found?"}
+  R -->|yes| RA["Answer shown or spoken"]
+  R -->|no| S["Forwarded to a responsible person"]
+  S --> T["Admin reviews and approves the reply"]
+  T --> U[("Knowledge base")]
+  U -.->|"used for later questions"| Q
+  classDef end1 fill:#fee2e2,stroke:#dc2626,color:#7f1d1d;
+  class BX end1;

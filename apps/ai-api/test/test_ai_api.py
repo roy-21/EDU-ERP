@@ -1,7 +1,9 @@
 from fastapi.testclient import TestClient
+from app.config import settings
 from app.main import app
 
-client = TestClient(app)
+# The service token is required whenever NODE_ENV is not development, as in production.
+client = TestClient(app, headers={"X-Service-Token": settings.SERVICE_SECRET})
 
 def test_ai_health():
     res = client.get("/api/v1/health")

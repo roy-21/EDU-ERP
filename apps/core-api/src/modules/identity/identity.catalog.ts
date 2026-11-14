@@ -103,6 +103,15 @@ export const MODULE_FEATURES: Record<string, { feature: string; permissions: { a
       { action: "manage_assets", label: "Assign, return, repair and dispose of assets" },
     ] },
   ],
+  // Anyone signed in to an institution that subscribes can ask the assistant; these cover running it.
+  "voice-ai": [
+    { feature: "AI knowledge assistant", permissions: [
+      { action: "manage_knowledge", label: "Upload and remove the assistant's documents" },
+      { action: "review_knowledge", label: "Review, edit and approve answers before the assistant learns them" },
+      { action: "manage_escalations", label: "Set up responsible persons and handle forwarded questions" },
+      { action: "view_analytics", label: "See assistant analytics and every question asked" },
+    ] },
+  ],
   system: [
     { feature: "Users and roles", permissions: [
       { action: "manage_users", label: "Create and edit users" },

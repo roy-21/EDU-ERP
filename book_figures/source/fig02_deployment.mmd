@@ -1,0 +1,28 @@
+flowchart LR
+  subgraph HOST["Developer / server machine"]
+    FE["<b>Next.js frontend</b><br/>npm run dev / next start<br/>:3000"]
+  end
+  subgraph DC["Docker Compose"]
+    direction TB
+    CORE["<b>erp-core-api</b><br/>:4000"]
+    AI["<b>erp-ai-api</b><br/>:8000"]
+    VOICE["<b>erp-voice-api</b><br/>:8050<br/>volume: voice_models"]
+    OLL["<b>erp-ollama</b><br/>internal only (not published)<br/>volume: ollama_models"]
+    PULL["<b>ollama-pull</b><br/>one-time: pulls qwen2.5:7b, bge-m3"]
+    PG[("<b>erp-postgres</b><br/>postgres:16-alpine · :5432<br/>loads schema.sql on first start<br/>volume: erp_pgdata")]
+    subgraph RES["Declared but unused"]
+      direction LR
+      AIPG[("ai-postgres<br/>pgvector · :5433")]
+      VPG[("voice-postgres<br/>:5434")]
+      RED[("erp-redis<br/>:6379")]
+    end
+  end
+  FE --> CORE
+  CORE -->|depends on, healthy| PG
+  CORE --> AI
+  CORE --> VOICE
+  VOICE -->|depends on| OLL
+  VOICE --> PG
+  PULL -.-> OLL
+  classDef unused fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:4 3,color:#6b7280;
+  class AIPG,VPG,RED unused;

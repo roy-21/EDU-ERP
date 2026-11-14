@@ -1,0 +1,63 @@
+erDiagram
+  erp_tenants ||--o{ erp_users : "has"
+  erp_tenants ||--o{ erp_roles : "defines custom"
+  erp_users ||--o{ erp_guardian_links : "as guardian"
+  acad_students ||--o{ erp_guardian_links : "linked to"
+  erp_tenants ||--o{ acad_students : "enrols"
+  acad_students ||--o{ fin_invoices : "billed"
+  fin_invoices ||--o{ fin_payments : "paid by"
+  erp_tenants {
+    string id PK
+    string code
+    string name
+    string status
+  }
+  erp_users {
+    string id PK
+    string institution_id FK
+    string username
+    string password_hash
+    string role
+    string status
+    boolean must_change_password
+    int failed_logins
+    timestamp locked_until
+    string linked_type
+    string linked_id
+  }
+  erp_roles {
+    string id PK
+    string institution_id FK
+    string name
+    string portal_type
+    text_array permissions
+  }
+  erp_guardian_links {
+    string guardian_user_id PK
+    string student_id PK
+    string relationship
+  }
+  acad_students {
+    string id PK
+    string institution_id FK
+    string student_no
+    string full_name
+    string status
+  }
+  fin_invoices {
+    string id PK
+    string institution_id FK
+    string student_id FK
+    string invoice_number
+    date due_date
+    numeric total_amount
+    string status
+  }
+  fin_payments {
+    string id PK
+    string invoice_id FK
+    numeric amount
+    string method
+    string receipt_number
+    string status
+  }

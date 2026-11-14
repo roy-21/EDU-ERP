@@ -23,6 +23,7 @@ import { noticeRouter } from "./modules/notice/notice.controller";
 import { libraryRouter } from "./modules/library/library.controller";
 import { hrRouter } from "./modules/hr/hr.controller";
 import { inventoryRouter } from "./modules/inventory/inventory.controller";
+import { assistantPublicRouter, assistantRouter } from "./modules/assistant/assistant.controller";
 
 export function createApp(): Application {
   const app = express();
@@ -51,6 +52,7 @@ export function createApp(): Application {
   apiRouter.use(authRouter);
   apiRouter.use(hostelPublicRouter);
   apiRouter.use(publicIdentityRouter);
+  apiRouter.use(assistantPublicRouter);
 
   // Protected Routes
   apiRouter.use(authMiddleware);
@@ -64,6 +66,7 @@ export function createApp(): Application {
   apiRouter.use(libraryRouter);
   apiRouter.use(hrRouter);
   apiRouter.use(inventoryRouter);
+  apiRouter.use(assistantRouter);
   apiRouter.use(objectionRouter);
   apiRouter.use(aiGatewayRouter);
   apiRouter.use(voiceGatewayRouter);

@@ -1,0 +1,65 @@
+\chapter{Future Work and Conclusion}
+\label{ch:future-conclusion}
+
+\section{Introduction}
+This chapter closes the report. The project set out to build one secure, multi-institution platform for the academic and administrative work of colleges, universities and polytechnic institutes, supported by artificial intelligence that answers people only from trusted sources. The previous chapters described how this platform was proposed, designed and implemented as four applications: a Next.js frontend, a Core API, an AI service and a Voice service.
+
+The main outcome is a working system in which institutions register and subscribe online, every request is checked against the user's current role and permissions, academic, financial, hostel, library, human resources, inventory and notice records are kept in one database, students and guardians use a portal, and a message and voice assistant answers in Bangla and English from live records, documents and approved answers while forwarding the rest to people. The work also has limitations, which this chapter states openly. It then describes the improvements that follow directly from those limitations, discusses the business prospects that the platform's subscription design makes possible, and ends with the conclusion of the project.
+
+\section{System Limitations}
+The current version of the system has the following limitations.
+
+\begin{itemize}
+    \item \textbf{Modules with sample data only:} About half of the modules in the administration panel, including learning management, digital classroom, scholarship, application, voting, research, transport, certificate, document management, reports, the notification centre, the security centre, system monitoring, the workflow engine and data import and export, currently provide interface screens with built-in sample data. They are not yet connected to the Core API. The objection module has a working backend interface used by the Voice service, but its screens are not yet connected either.
+
+    \item \textbf{Prediction models trained on synthetic data:} The Random Forest risk classifier and the ridge regression GPA model are trained on synthetic records generated when the AI service starts, because real student records were not available. Their output shows how prediction fits into the platform, but their accuracy has not been measured on real data. The prediction service is available through the Core API, but no screen in the administration panel calls it yet.
+
+    \item \textbf{Simple course question answering in the AI service:} The course question answering endpoint of the AI service searches a small built-in set of sample passages by keywords. The full retrieval-based answering that uses the institution's own documents is implemented in the message assistant, not in this endpoint.
+
+    \item \textbf{Speed of local language and speech models:} The language model, the embedding model and the speech models run on the server's processor. On the development laptop, an answer written by the language model took about 40 to 80 seconds, and a spoken turn took from about 20 seconds, when answered from live records, to about 100 seconds, when the language model wrote the answer. This is acceptable for testing but slow for many users at once.
+
+    \item \textbf{Bangla speech recognition not tested with human voices:} Bangla speech is recognised with the large-v3-turbo Whisper model. In testing with machine-generated Bangla speech, recognition was not accurate, and it has not yet been tested with recordings of real speakers.
+
+    \item \textbf{External providers not verified in practice:} Forwarding questions by SMS or call, and hostel notifications by SMS, work only after an institution configures the providers, and they were tested with fake providers only. The bKash online payment integration for hostel rent was tested against a fake gateway and has not yet been checked against the real bKash sandbox.
+
+    \item \textbf{Unused deployment components:} The Docker Compose file declares separate PostgreSQL databases for the AI and Voice services and a Redis cache, but the current code does not use them. All data is stored in the central ERP database.
+\end{itemize}
+
+\section{Future Enhancements}
+The following enhancements follow directly from the limitations above and from the parts of the system that are already prepared for them.
+
+\begin{itemize}
+    \item \textbf{Connect the remaining modules:} The screens that now show sample data can be connected to new Core API modules built in the same way as the existing ones, with their own routes, permission keys, institution-scoped tables and automated tests. The objection screens can be connected to the existing objection interface.
+
+    \item \textbf{Train and evaluate the models on real data:} With the consent of a partner institution, the risk and GPA models can be trained on real attendance, marks, assignment and fee records already stored in the system, and their accuracy can be measured with held-out data before the results are shown to staff. The predictions can then be shown on the AI analytics screens.
+
+    \item \textbf{Faster answers with a graphics processor:} The Docker Compose configuration already notes that a graphics processor can be given to the Ollama container. Running the language model on a server with an NVIDIA graphics processor would reduce answer times substantially.
+
+    \item \textbf{Improve Bangla voice support:} Bangla speech recognition should be tested with recordings of real students and guardians, and the model settings adjusted according to the results, so that the voice channel becomes reliable for Bangla speakers.
+
+    \item \textbf{Verify payment and messaging providers:} The bKash integration should be checked against the bKash sandbox, and SMS and call providers should be connected and tested, so that online rent payment and question forwarding work end to end.
+
+    \item \textbf{Use or remove the unused containers:} The AI service could keep its own data, such as model versions and prediction history, in its declared database, and Redis could be used for caching or rate limiting; otherwise these containers can be removed from the deployment to save resources.
+\end{itemize}
+
+\section{Business Prospects}
+The platform was designed from the start to be offered as a subscription service to many institutions, and the code already contains the parts needed for this.
+
+\begin{itemize}
+    \item \textbf{Online self-registration:} An institution can register by itself, choose only the modules it needs, and see a price quote before submitting its registration. The Super Admin then approves or rejects it, so new customers can join without manual setup by the provider.
+
+    \item \textbf{Module-based pricing:} Each module has its own monthly price that the Super Admin can change, while core modules are included at no charge. An institution pays only for the modules it uses and can request changes to its subscription later.
+
+    \item \textbf{Monthly or yearly billing:} Institutions can choose monthly or yearly billing, and a yearly subscription is charged for ten months, which gives an incentive to commit for a full year. Subscription invoices are generated automatically, with a due date ten days after issue, and payments by bank transfer, bKash, Nagad, cash, cheque or card can be recorded against them.
+
+    \item \textbf{Control over customers:} The Super Admin can view each institution's activity, change its modules, and suspend or reactivate it, for example when subscription invoices remain unpaid.
+
+    \item \textbf{Low running cost and data privacy for AI:} The assistant uses a language model and an embedding model that run on the provider's or institution's own server through Ollama, so no fee is paid per question to an outside AI service, and questions and documents do not leave the server. This matters to educational institutions that hold personal records.
+
+    \item \textbf{Suitability for local institutions:} Support for Bangla questions and answers, Bangla text-to-speech, and payment methods such as bKash and Nagad make the platform suited to institutions in Bangladesh, where families commonly use these channels.
+\end{itemize}
+
+\section{Conclusion}
+This project developed the \textit{Next-Generation AI-Driven Smart Education Management System}, a multi-institution platform that brings the daily work of educational institutions into one secure system and supports it with trustworthy artificial intelligence. The objectives set in Chapter~I were addressed as follows. Institutions register, subscribe and work in isolated spaces on one platform. Access is protected by bcrypt password hashing, signed tokens, account locking, forced replacement of temporary passwords, built-in and custom roles, and permission checks on every request. Academic structure, attendance, examinations and results, finance, hostel, library, human resources, inventory and notices are managed in modules that share one database. Students and guardians see their own records in a portal. A message and voice assistant answers in Bangla and English from live records, institution documents and administrator-approved answers, refuses to change data, and forwards questions it cannot answer to responsible people, while prediction models estimate academic risk and GPA.
+
+The main contribution of the work is the integration of established methods, including role-based access control, retrieval-based question answering with a locally hosted language model, speech recognition and synthesis, and machine learning prediction, into a single system that institutions can use every day, with human review placed between the assistant and its knowledge. All 172 automated test cases of the three backend applications pass, and the system was demonstrated end to end with a sample institution. Its limitations, mainly the modules that still show sample data, the synthetic training data of the prediction models and the speed of local models on a processor, point to clear next steps: connecting the remaining modules, training the models on real data, running the models on a graphics processor and verifying the external providers. With these improvements, the platform has the potential to serve many institutions as a subscription service and to give students, guardians and staff reliable information whenever they need it.

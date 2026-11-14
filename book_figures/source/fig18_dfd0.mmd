@@ -1,0 +1,27 @@
+flowchart LR
+  INS["Registering<br/>institution"]
+  SA["Super Admin"]
+  AD["Institution Admin"]
+  SF["Staff roles<br/>(Teacher, Accountant,<br/>Warden, Storekeeper, Staff)"]
+  ST["Student / Guardian"]
+  RP["Responsible person"]
+  MAIL["Email server<br/>(SMTP)"]
+  PRV["SMS / call<br/>providers"]
+  PAY["bKash payment<br/>gateway"]
+  P0(("0<br/>Education<br/>Management<br/>System"))
+  INS -->|"registration, module choice"| P0
+  P0 -->|"price quote, credentials"| INS
+  SA -->|"approvals, tenant status, billing"| P0
+  P0 -->|"tenant overview, invoices"| SA
+  AD -->|"configuration, users, results, notices,<br/>documents, review decisions"| P0
+  P0 -->|"reports, activity, review queue"| AD
+  SF -->|"attendance, marks, payments,<br/>hostel and stock records"| P0
+  P0 -->|"lists, summaries, receipts"| SF
+  ST -->|"questions, voice, meal bookings,<br/>online payments"| P0
+  P0 -->|"results, fees, notices,<br/>answers, spoken replies"| ST
+  P0 -->|"forwarded question + reply link"| RP
+  RP -->|"answer"| P0
+  P0 -->|"emails"| MAIL
+  P0 -->|"SMS, calls"| PRV
+  P0 -->|"payment request"| PAY
+  PAY -->|"payment result"| P0

@@ -1,0 +1,207 @@
+\chapter{System Design}
+\label{ch:system-design}
+
+% Don't remove this
+\makeatletter
+\newcommand{\fixedgraphics}[2][]{%
+  \begingroup
+    \setkeys{Gin}{keepaspectratio}%
+    \includegraphics[#1]{#2}%
+  \endgroup
+}
+\makeatother
+
+\section{Introduction}
+This chapter presents the design of the proposed system, which turns the features of Chapter~III and the methods of Chapter~V into a structure that can be built. The design follows the four-application architecture already introduced: a Next.js frontend, a Core API that is the only entry point and holds all business rules, an AI service and a Voice service, with one central PostgreSQL database.
+
+The design is presented through several kinds of diagrams, each showing the system from a different angle. The workflow diagram shows the overall life of an institution on the platform, from registration to daily operation. Flowcharts show the detailed logic of request handling, document processing and question escalation. Entity--relationship diagrams show how the main data is organised in the database. The use case diagram shows what each type of user can do, the activity diagram shows how several roles work together to publish examination results, and sequence diagrams show the messages exchanged during sign-in and voice calls. Finally, data flow diagrams at levels 0, 1 and 2 show how data moves between external entities, the main processes and the data stores. All diagrams are drawn from the implemented code.
+
+\vspace{0.5cm}
+
+% ----- WORKFLOW -----
+\section{Workflow Diagram}
+The workflow of the system follows the life of an institution on the platform, as shown in Figure~\ref{fig:workflow}. An institution registers online, chooses its modules and billing cycle and receives a price quote. The Super Admin reviews the registration; once it is approved, the institution becomes active and its administrator receives credentials by email. The administrator signs in, replaces the temporary password and configures the institution: its academic structure, roles and permissions, grading rules, fee structure, hostel and settings. The administrator then creates accounts for teachers, staff, students and guardians, each of whom receives a temporary password by email.
+
+From then on, each role carries out its daily work. Teachers take attendance and enter marks, accountants manage invoices and payments, wardens manage rooms, rent, meals and visitors, storekeepers manage stock, assets and the kitchen, and administrators publish results and notices and manage human resources and the library. All of this work is stored in the central database, while background schedulers generate rent and subscription invoices, send reminders, reconcile online payments, send inventory alerts, process uploaded documents and retry forwarded questions. Students and guardians read their records through the portal, and any user can ask the assistant. When the assistant finds no trusted answer, the question goes to a responsible person, and the reply, once approved by an administrator, is added to the knowledge base for later questions.
+
+\vspace{0.5cm}
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.8\textwidth,height=0.8\textheight]{book_figures/fig15_workflow.png}
+    \caption{Workflow Diagram}
+    \label{fig:workflow}
+  \end{figure}
+}
+
+% ----- FLOWCHART -----
+\section{Flowchart}
+Three flowcharts describe the most important internal logic of the system.
+
+\subsection{Request handling}
+Figure~\ref{fig:pipeline} shows how the Core API handles every request. The request first passes through request context, cross-origin and JSON body handling, and a correlation identifier is attached for tracing. Public routes, such as health, sign-in, public hostel payment, registration and the assistant reply link, go directly to their module. A call from the AI or Voice service with a valid service token is treated as an internal call for the named institution. Every other request must carry a valid JSON Web Token; the user is then loaded from the database, a user who must change a temporary password is stopped, and the permission required by the route is checked. Only then does the request reach the module, which limits every query to the user's institution.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.65\textwidth,height=0.8\textheight]{book_figures/fig06_request_pipeline.png}
+    \caption{Core API request authentication and authorisation pipeline}
+    \label{fig:pipeline}
+  \end{figure}
+}
+
+\subsection{Document processing}
+Figure~\ref{fig:ingestion} shows how a document uploaded for the assistant becomes searchable knowledge. The document is stored with the status queued. The assistant scheduler takes the next due document and marks it as processing. The Voice service extracts its text, using pypdf for PDF files and python-docx for Word files. The Core API cleans the text, splits it into chunks and computes search terms, and the Voice service then creates bge-m3 embeddings for the chunks. The chunks are stored, and the document becomes ready with its chunk count and the number of embedded chunks. If no embedding provider is available, the chunks are stored without embeddings and are searched by words only. If text extraction fails, the document is marked as failed and is retried later.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.55\textwidth,height=0.8\textheight]{book_figures/fig08_document_ingestion.png}
+    \caption{Knowledge document ingestion pipeline}
+    \label{fig:ingestion}
+  \end{figure}
+}
+
+\subsection{Question escalation and review}
+Figure~\ref{fig:escalation} shows what happens to a question the assistant cannot answer. The responsible person whose topics best match the question, or else the default person, is chosen. If nobody is set, the escalation waits for an administrator. Otherwise the question is sent on each of the person's channels with a private reply link valid for fourteen days. A failed delivery is retried with a growing delay up to five attempts, after which the escalation waits for an administrator. When the person answers, the escalation becomes answered and a review is created with the received answer and an AI draft. An administrator approves or rejects it; an approved answer is stored as knowledge and indexed, the original question is marked as answered later, and future similar questions are answered from it.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.7\textwidth,height=0.8\textheight]{book_figures/fig09_escalation_review.png}
+    \caption{Escalation of unanswered questions and admin review}
+    \label{fig:escalation}
+  \end{figure}
+}
+
+% ----- ER DIAGRAM -----
+\section{E-R Diagram}
+The database contains 119 tables. Every table that holds institutional data carries an institution identifier, and the institution table is the root of all data. The three entity--relationship diagrams below show the central part of the design.
+
+Figure~\ref{fig:erd-identity} shows identity, guardians and finance. An institution has many users and may define custom roles. A user record holds the hashed password, role, status, the must-change-password flag, the count of failed sign-ins and the lock time, and may be linked to a student, teacher or staff record. Guardians are linked to students through a link table that also records the relationship. Students receive fee invoices, and each invoice can be paid by one or more payments.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.75\textwidth,height=0.8\textheight]{book_figures/fig12_erd_identity_finance.png}
+    \caption{Entity--relationship diagram: identity, guardians and finance}
+    \label{fig:erd-identity}
+  \end{figure}
+}
+
+Figure~\ref{fig:erd-academics} shows the academic structure. A department offers programs, owns courses and has teachers. A program runs sections within academic sessions, and each student belongs to a program and a section. A class connects a course, a section and a teacher. Attendance is recorded as attendance sessions of a class, with one mark per student. Exams belong to a session; each exam has an assessment for each class, and marks are stored per assessment and student.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=\textwidth,height=0.8\textheight]{book_figures/fig13_erd_academics.png}
+    \caption{Entity--relationship diagram: academic structure, attendance and marks}
+    \label{fig:erd-academics}
+  \end{figure}
+}
+
+Figure~\ref{fig:erd-assistant} shows the assistant and voice data. Each institution has assistant settings, documents, responsible contacts and questions. Documents are split into chunks, and approved knowledge is indexed as chunks in the same table. A question may be forwarded as an escalation handled by a contact, and the answer is reviewed in a review record that, once approved, creates a knowledge entry. Voice sessions contain the caller and assistant turns of each call.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.8\textwidth,height=0.8\textheight]{book_figures/fig14_erd_assistant.png}
+    \caption{Entity--relationship diagram: AI assistant and voice calls}
+    \label{fig:erd-assistant}
+  \end{figure}
+}
+
+% ----- USE CASE -----
+\section{Use Case Diagram}
+Figure~\ref{fig:usecase} shows the main actors and what each can do in the system, based on the permissions of the built-in roles. The Super Admin approves registrations and manages institutions, modules and billing. The Institution Admin manages users, roles, permissions and settings, the academic structure and people records, publishes results and notices, uploads documents for the assistant and reviews its answers. The Accountant manages fee invoices and payments and hostel payments, the Hostel Warden manages hostel rooms, allocations, rent, meals and visitors, and the Storekeeper manages stock, transfers, assets and the kitchen. The Teacher takes attendance, enters and locks marks, requests store items and uses self-service for leave and payslips. Students and guardians view their records in the portal, students pay hostel invoices online and book meals, and teachers, students and guardians can ask the assistant. A responsible person answers questions forwarded by the assistant through a private link.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.6\textwidth,height=0.85\textheight]{book_figures/fig16_use_case.png}
+    \caption{Use case diagram of the system}
+    \label{fig:usecase}
+  \end{figure}
+}
+
+% ----- ACTIVITY -----
+\section{Activity Diagram}
+Figure~\ref{fig:activity} shows the activity of publishing examination results, which involves several roles. The Institution Admin creates the exams of a session with their weights and maximum marks. Each teacher opens a class and an exam assessment, enters marks, marks absent students and locks the assessment. The Core API combines the weighted assessments into a percentage for each student and applies the grading configuration to give a letter grade, grade point and pass or fail. When the administrator publishes the class results, the system checks that the exam weights add up to 100\% and that all marks are locked. If not, publishing is refused with the reason, and the teacher can unlock an assessment to correct marks. Once published, students and guardians see the results term by term with a credit-weighted GPA in the portal; the administrator can withdraw the results if needed.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.8\textwidth,height=0.8\textheight]{book_figures/fig17_activity_results.png}
+    \caption{Activity diagram for examination result publication}
+    \label{fig:activity}
+  \end{figure}
+}
+
+% ----- SEQUENCE -----
+\section{Sequence Diagram}
+Two sequence diagrams show the messages exchanged between the parts of the system over time.
+
+Figure~\ref{fig:login} shows sign-in. The user enters a username or email and password, and the frontend sends them to the Core API, which looks up the user. If the account is locked, the request is refused. If the password is wrong, the failure count is increased, the account is locked for fifteen minutes on the fifth failure, and the attempt is written to the audit log. If the account or institution is not active, access is refused. Otherwise the failure count is reset and a token is returned with the user's role, permissions and modules. If the user must change a temporary password, the frontend asks for a new one and receives a fresh token. The frontend then opens the administration panel or the portal according to the role.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=\textwidth,height=0.8\textheight]{book_figures/fig05_login_sequence.png}
+    \caption{Sign-in and temporary password change sequence}
+    \label{fig:login}
+  \end{figure}
+}
+
+Figure~\ref{fig:voice} shows a voice call. When the user starts a call, the Core API asks the Voice service to create a session, which is stored in the database. For each spoken turn, the browser sends the recording to the Core API, which passes it to the Voice service for speech-to-text; the caller's turn is stored and the text is returned. The Core API answers the text through the same process as a typed question, then asks the Voice service to speak the answer; the assistant's turn is stored and the audio is returned to the browser, which plays it. When the user ends the call, the session is closed.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=\textwidth,height=0.8\textheight]{book_figures/fig10_voice_call_sequence.png}
+    \caption{Voice call sequence between the browser, Core API and Voice API}
+    \label{fig:voice}
+  \end{figure}
+}
+
+% ----- DFD LEVEL 0 -----
+\section{DFD Level 0}
+The level 0 data flow diagram in Figure~\ref{fig:dfd0} shows the whole system as one process and the external entities it exchanges data with. A registering institution sends its registration and module choice and receives a price quote and credentials. The Super Admin sends approvals, tenant status changes and billing actions and receives tenant overviews and invoices. The Institution Admin sends configuration, users, results, notices, documents and review decisions and receives reports, activity and the review queue. Staff roles send attendance, marks, payments and hostel and stock records and receive lists, summaries and receipts. Students and guardians send questions, voice recordings, meal bookings and online payments and receive results, fees, notices and answers. Forwarded questions go to responsible persons, who return answers. The system also sends emails through the SMTP server, SMS and calls through the configured providers, and payment requests to the bKash gateway, which returns payment results.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=0.9\textwidth,height=0.8\textheight]{book_figures/fig18_dfd0.png}
+    \caption{Data flow diagram, level 0}
+    \label{fig:dfd0}
+  \end{figure}
+}
+
+% ----- DFD LEVEL 1 -----
+\section{DFD Level 1}
+The level 1 data flow diagram in Figure~\ref{fig:dfd1} divides the system into its main processes and data stores. Process 1.0 authenticates and authorises every user request against the users and roles store (D1). Process 2.0 manages institutions and subscriptions in store D2 for the Super Admin. Authorised administrators and staff use processes 3.0 to 7.0, which manage users and roles (D1), academic records (D3), fee invoices and payments (D4), hostel records (D5), with the bKash gateway for online payments, and library, human resources, inventory and notice records (D6). Process 8.0, the portal, reads students' and guardians' own records from D3 to D6. Process 9.0, the AI assistant, receives questions and audio, reads the asker's own records from D3 to D5, uses the questions and knowledge store (D7), stores voice sessions and turns (D8), and exchanges forwarded questions and answers with responsible persons. Process 10.0 returns risk levels and GPA forecasts from the student indicators sent by staff.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=\textwidth,height=0.8\textheight]{book_figures/fig19_dfd1.png}
+    \caption{Data flow diagram, level 1}
+    \label{fig:dfd1}
+  \end{figure}
+}
+
+% ----- DFD LEVEL 2 -----
+\section{DFD Level 2}
+The level 2 data flow diagram in Figure~\ref{fig:dfd2} expands process 9.0, the AI assistant. A spoken question enters process 9.8, which uses the Voice service to convert speech to text and stores the turn in D8; a typed question enters process 9.1 directly. Process 9.1 detects the language and intent: a request to change data is refused and recorded in D7.1, a live-data question goes to process 9.2, which answers from the asker's own records, and a knowledge question goes to process 9.3, which retrieves and ranks chunks from D7.2. Process 9.4 asks the language model through the Voice service to write an answer grounded in the retrieved passages and stores it with its sources in D7.1. When no trusted answer exists, process 9.5 forwards the question using the escalations and contacts in D7.4 and receives the responsible person's answer, which it stores with an AI draft in D7.5. In process 9.6 the administrator approves or rejects the reply; an approved answer is indexed in D7.2 and the original question is marked as answered later. Process 9.7 ingests documents uploaded by the administrator into D7.3 and, through text extraction and embedding by the Voice service, into D7.2.
+
+{
+  \begin{figure}[!htbp]
+    \centering
+    \fixedgraphics[width=\textwidth,height=0.8\textheight]{book_figures/fig20_dfd2_assistant.png}
+    \caption{Data flow diagram, level 2: AI assistant (process 9.0)}
+    \label{fig:dfd2}
+  \end{figure}
+}
+
+\section{Summary}
+This chapter presented the design of the proposed system through diagrams drawn from the implemented code. The workflow diagram showed the life of an institution on the platform, from registration and approval to daily operation, background jobs, the portal and the assistant. Flowcharts described request handling, document processing and question escalation. Three entity--relationship diagrams showed the organisation of identity, finance, academic and assistant data. The use case diagram showed what each role can do, the activity diagram showed how several roles work together to publish results, and the sequence diagrams showed sign-in and voice calls. The data flow diagrams at levels 0, 1 and 2 showed how data moves between external entities, processes and data stores, with the AI assistant expanded in detail. Together, these designs form the basis of the implementation described in the next chapter.
